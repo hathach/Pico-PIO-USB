@@ -14,7 +14,7 @@ typedef struct {
     int8_t debug_pin_eop;
 } pio_usb_configuration_t;
 
-#define PIO_USB_DP_PIN_DEFAULT 0
+#define PIO_USB_DP_PIN_DEFAULT 2
 #define PIO_USB_DM_PIN_DEFAULT (PIO_USB_DP_PIN_DEFAULT + 1)
 
 #define PIO_USB_TX_DEFAULT 0

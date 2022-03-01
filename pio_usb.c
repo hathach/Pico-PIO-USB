@@ -24,6 +24,8 @@
 #include "usb_tx.pio.h"
 #include "usb_rx.pio.h"
 
+#include "tusb.h"
+
 #define UNUSED_PARAMETER(x) (void)x
 
 #define IRQ_TX_EOP_MASK (1 << usb_tx_fs_IRQ_EOP)
@@ -32,45 +34,45 @@
 #define IRQ_RX_COMP_MASK (1 << IRQ_RX_EOP)
 #define IRQ_RX_ALL_MASK ((1 << IRQ_RX_EOP) | (1 << IRQ_RX_BS_ERR) | (1 << IRQ_RX_START))
 
-typedef struct {
-  uint16_t div_int;
-  uint8_t div_frac;
-} pio_clk_div_t;
+//typedef struct {
+//  uint16_t div_int;
+//  uint8_t div_frac;
+//} pio_clk_div_t;
 
-typedef struct {
-  PIO pio_usb_tx;  // colud not set to volatile
-  uint sm_tx;
-  uint offset_tx;
-  uint tx_ch;
+//typedef struct {
+//  PIO pio_usb_tx;  // colud not set to volatile
+//  uint sm_tx;
+//  uint offset_tx;
+//  uint tx_ch;
+//
+//  PIO pio_usb_rx;  // colud not set to volatile
+//  uint sm_rx;
+//  uint offset_rx;
+//  uint sm_eop;
+//  uint offset_eop;
+//  uint rx_reset_instr;
+//  uint device_rx_irq_num;
+//
+//  pio_clk_div_t clk_div_fs_tx;
+//  pio_clk_div_t clk_div_fs_rx;
+//  pio_clk_div_t clk_div_ls_tx;
+//  pio_clk_div_t clk_div_ls_rx;
+//
+//  bool need_pre;
+//
+//  uint8_t usb_rx_buffer[128];
+//} pio_port_t;
 
-  PIO pio_usb_rx;  // colud not set to volatile
-  uint sm_rx;
-  uint offset_rx;
-  uint sm_eop;
-  uint offset_eop;
-  uint rx_reset_instr;
-  uint device_rx_irq_num;
+/*static*/ usb_device_t usb_device[PIO_USB_DEVICE_CNT];
+/*static*/ pio_port_t pio_port[1];
+/*static*/ root_port_t root_port[PIO_USB_ROOT_PORT_CNT];
+/*static*/ endpoint_t ep_pool[PIO_USB_EP_POOL_CNT];
 
-  pio_clk_div_t clk_div_fs_tx;
-  pio_clk_div_t clk_div_fs_rx;
-  pio_clk_div_t clk_div_ls_tx;
-  pio_clk_div_t clk_div_ls_rx;
-
-  bool need_pre;
-
-  uint8_t usb_rx_buffer[128];
-} pio_port_t;
-
-static usb_device_t usb_device[PIO_USB_DEVICE_CNT];
-static pio_port_t pio_port[1];
-static root_port_t root_port[PIO_USB_ROOT_PORT_CNT];
-static endpoint_t ep_pool[PIO_USB_EP_POOL_CNT];
-
-static pio_usb_configuration_t current_config;
+/*static*/ pio_usb_configuration_t current_config;
 
 #define SM_SET_CLKDIV(pio, sm, div) pio_sm_set_clkdiv_int_frac(pio, sm, div.div_int, div.div_frac)
 
-static void __no_inline_not_in_flash_func(send_pre)(const pio_port_t *pp) {
+/*static*/ void __no_inline_not_in_flash_func(send_pre)(const pio_port_t *pp) {
   uint8_t data[] = {USB_SYNC, USB_PID_PRE};
 
   // send PRE token in full-speed
@@ -108,7 +110,7 @@ static void __no_inline_not_in_flash_func(send_pre)(const pio_port_t *pp) {
   pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_eop, true);
 }
 
-static void __no_inline_not_in_flash_func(restore_fs_bus)(const pio_port_t *pp) {
+/*static*/ void __no_inline_not_in_flash_func(restore_fs_bus)(const pio_port_t *pp) {
   // change bus speed to full-speed
   pio_sm_set_enabled(pp->pio_usb_tx, pp->sm_tx, false);
   SM_SET_CLKDIV(pp->pio_usb_tx, pp->sm_tx, pp->clk_div_fs_tx);
@@ -122,7 +124,7 @@ static void __no_inline_not_in_flash_func(restore_fs_bus)(const pio_port_t *pp) 
   pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_eop, true);
 }
 
-static void __not_in_flash_func(usb_transfer)(const pio_port_t *pp,
+/*static*/ void __not_in_flash_func(usb_transfer)(const pio_port_t *pp,
                                               uint8_t *data, uint16_t len) {
   if (pp->need_pre) {
     send_pre(pp);
@@ -162,7 +164,7 @@ void __no_inline_not_in_flash_func(send_out_token)(const pio_port_t *pp,
   usb_transfer(pp, packet, sizeof(packet));
 }
 
-static void __no_inline_not_in_flash_func(send_ack)(const pio_port_t *pp) {
+/*static*/ void __no_inline_not_in_flash_func(send_ack)(const pio_port_t *pp) {
   uint8_t data[] = {USB_SYNC, USB_PID_ACK};
 
   if (pp->need_pre) {
@@ -186,14 +188,14 @@ void __no_inline_not_in_flash_func(send_nak)(const pio_port_t *pp) {
   usb_transfer(pp, data, sizeof(data));
 }
 
-static void __no_inline_not_in_flash_func(prepare_receive)(const pio_port_t *pp) {
+/*static*/ void __no_inline_not_in_flash_func(prepare_receive)(const pio_port_t *pp) {
   pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_rx, false);
   pio_sm_clear_fifos(pp->pio_usb_rx, pp->sm_rx);
   pio_sm_restart(pp->pio_usb_rx, pp->sm_rx);
   pio_sm_exec(pp->pio_usb_rx, pp->sm_rx, pp->rx_reset_instr);
 }
 
-static void __no_inline_not_in_flash_func(start_receive)(const pio_port_t *pp) {
+/*static*/ void __no_inline_not_in_flash_func(start_receive)(const pio_port_t *pp) {
   pp->pio_usb_rx->ctrl |= (1 << pp->sm_rx);
   pp->pio_usb_rx->irq |= IRQ_RX_ALL_MASK;
 }
@@ -245,7 +247,7 @@ void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t add
   packet[3] = (crc << 3) | ((dat >> 8) & 0x1f);
 }
 
-static void __no_inline_not_in_flash_func(wait_handshake)(pio_port_t* pp) {
+/*static*/ void __no_inline_not_in_flash_func(wait_handshake)(pio_port_t* pp) {
   int16_t t = 240;
   int16_t idx = 0;
 
@@ -268,7 +270,7 @@ static void __no_inline_not_in_flash_func(wait_handshake)(pio_port_t* pp) {
   pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_rx, false);
 }
 
-static int __no_inline_not_in_flash_func(usb_out_transaction)(pio_port_t* pp, uint8_t addr, endpoint_t * ep) {
+/*static*/ int __no_inline_not_in_flash_func(usb_out_transaction)(pio_port_t* pp, uint8_t addr, endpoint_t * ep) {
   int res = -1;
 
   prepare_receive(pp);
@@ -297,7 +299,7 @@ static int __no_inline_not_in_flash_func(usb_out_transaction)(pio_port_t* pp, ui
   return res;
 }
 
-static int __no_inline_not_in_flash_func(receive_packet_and_ack)(pio_port_t* pp) {
+/*static*/ int __no_inline_not_in_flash_func(receive_packet_and_ack)(pio_port_t* pp) {
   uint16_t crc = 0xffff;
   uint16_t crc_prev = 0xffff;
   uint16_t crc_prev2 = 0xffff;
@@ -340,7 +342,7 @@ static int __no_inline_not_in_flash_func(receive_packet_and_ack)(pio_port_t* pp)
   return -1;
 }
 
-static int __no_inline_not_in_flash_func(usb_in_transaction)(pio_port_t* pp, uint8_t addr, endpoint_t * ep) {
+/*static*/ int __no_inline_not_in_flash_func(usb_in_transaction)(pio_port_t* pp, uint8_t addr, endpoint_t * ep) {
   int res = -1;
 
   uint8_t expect_token = ep->data_id == 0 ? USB_PID_DATA0 : USB_PID_DATA1;
@@ -371,7 +373,7 @@ static int __no_inline_not_in_flash_func(usb_in_transaction)(pio_port_t* pp, uin
   return res;
 }
 
-static int __no_inline_not_in_flash_func(usb_control_out_transfer)(
+/*static*/ int __no_inline_not_in_flash_func(usb_control_out_transfer)(
     pio_port_t *pp, uint8_t addr, control_pipe_t *pipe) {
   int res = 0;
 
@@ -432,7 +434,7 @@ static int __no_inline_not_in_flash_func(usb_control_out_transfer)(
   return res;
 }
 
-static uint8_t __no_inline_not_in_flash_func(usb_control_in_transfer)(pio_port_t* pp, uint8_t addr, control_pipe_t * pipe) {
+/*static*/ uint8_t __no_inline_not_in_flash_func(usb_control_in_transfer)(pio_port_t* pp, uint8_t addr, control_pipe_t * pipe) {
   if (pipe->stage == STAGE_SETUP) {
     control_setup_transfer(pp, addr, pipe->setup_packet.tx_address,
                            pipe->setup_packet.tx_length);
@@ -494,14 +496,14 @@ static uint8_t __no_inline_not_in_flash_func(usb_control_in_transfer)(pio_port_t
   return pipe->stage;
 }
 
-typedef enum{
-  PORT_PIN_SE0,
-  PORT_PIN_FS_IDLE,
-  PORT_PIN_LS_IDLE,
-  PORT_PIN_SE1,
-} port_pin_status_t;
+//typedef enum{
+//  PORT_PIN_SE0,
+//  PORT_PIN_FS_IDLE,
+//  PORT_PIN_LS_IDLE,
+//  PORT_PIN_SE1,
+//} port_pin_status_t;
 
-static port_pin_status_t __no_inline_not_in_flash_func(get_port_pin_status)(
+/*static*/ port_pin_status_t __no_inline_not_in_flash_func(get_port_pin_status)(
     root_port_t *port) {
   bool dp = gpio_get(port->pin_dp);
   bool dm = gpio_get(port->pin_dm);
@@ -517,7 +519,7 @@ static port_pin_status_t __no_inline_not_in_flash_func(get_port_pin_status)(
   return PORT_PIN_SE1;
 }
 
-static bool __no_inline_not_in_flash_func(connection_check)(root_port_t *port) {
+/*static*/ bool __no_inline_not_in_flash_func(connection_check)(root_port_t *port) {
   if (get_port_pin_status(port) == PORT_PIN_SE0) {
     busy_wait_us_32(1);
 
@@ -525,6 +527,7 @@ static bool __no_inline_not_in_flash_func(connection_check)(root_port_t *port) {
       busy_wait_us_32(1);
       // device disconnect
       port->event = EVENT_DISCONNECT;
+      hcd_event_device_remove(port - root_port + 1, true);
       return false;
     }
   }
@@ -532,7 +535,7 @@ static bool __no_inline_not_in_flash_func(connection_check)(root_port_t *port) {
   return true;
 }
 
-static void __no_inline_not_in_flash_func(override_pio_program)(PIO pio, const pio_program_t* program, uint offset) {
+/*static*/ void __no_inline_not_in_flash_func(override_pio_program)(PIO pio, const pio_program_t* program, uint offset) {
     for (uint i = 0; i < program->length; ++i) {
       uint16_t instr = program->instructions[i];
       pio->instr_mem[offset + i] =
@@ -541,7 +544,7 @@ static void __no_inline_not_in_flash_func(override_pio_program)(PIO pio, const p
     }
 }
 
-static __always_inline void override_pio_rx_program(PIO pio,
+/*static*/ __always_inline void override_pio_rx_program(PIO pio,
                                              const pio_program_t *program,
                                              const pio_program_t *debug_program,
                                              uint offset, int debug_pin) {
@@ -552,7 +555,7 @@ static __always_inline void override_pio_rx_program(PIO pio,
   }
 }
 
-static __always_inline void add_pio_host_rx_program(PIO pio,
+/*static*/ __always_inline void add_pio_host_rx_program(PIO pio,
                                              const pio_program_t *program,
                                              const pio_program_t *debug_program,
                                              uint *offset, int debug_pin) {
@@ -563,7 +566,7 @@ static __always_inline void add_pio_host_rx_program(PIO pio,
   }
 }
 
-static void __no_inline_not_in_flash_func(initialize_host_programs)(
+/*static*/ void __no_inline_not_in_flash_func(initialize_host_programs)(
     pio_port_t *pp, const pio_usb_configuration_t *c, root_port_t *port) {
   pp->offset_tx = pio_add_program(pp->pio_usb_tx, &usb_tx_fs_program);
   usb_tx_fs_program_init(pp->pio_usb_tx, pp->sm_tx, pp->offset_tx,
@@ -587,7 +590,7 @@ static void __no_inline_not_in_flash_func(initialize_host_programs)(
   usb_rx_configure_pins(pp->pio_usb_rx, pp->sm_rx, port->pin_dp);
 }
 
-static void __no_inline_not_in_flash_func(configure_fullspeed_host)(
+/*static*/ void __no_inline_not_in_flash_func(configure_fullspeed_host)(
     pio_port_t *pp, const pio_usb_configuration_t *c, root_port_t *port) {
   override_pio_program(pp->pio_usb_tx, &usb_tx_fs_program, pp->offset_tx);
   SM_SET_CLKDIV(pp->pio_usb_tx, pp->sm_tx, pp->clk_div_fs_tx);
@@ -607,7 +610,7 @@ static void __no_inline_not_in_flash_func(configure_fullspeed_host)(
   usb_rx_configure_pins(pp->pio_usb_rx, pp->sm_rx, port->pin_dp);
 }
 
-static void __no_inline_not_in_flash_func(configure_lowspeed_host)(
+/*static*/ void __no_inline_not_in_flash_func(configure_lowspeed_host)(
     pio_port_t *pp, const pio_usb_configuration_t *c, root_port_t *port) {
   override_pio_program(pp->pio_usb_tx, &usb_tx_ls_program, pp->offset_tx);
   SM_SET_CLKDIV(pp->pio_usb_tx, pp->sm_tx, pp->clk_div_ls_tx);
@@ -627,7 +630,7 @@ static void __no_inline_not_in_flash_func(configure_lowspeed_host)(
   usb_rx_configure_pins(pp->pio_usb_rx, pp->sm_rx, port->pin_dm);
 }
 
-static void __no_inline_not_in_flash_func(configure_root_port)(
+/*static*/ void __no_inline_not_in_flash_func(configure_root_port)(
     pio_port_t *pp, root_port_t *root) {
   usb_device_t *root_device = root->root_device;
   bool is_fs = root_device->is_fullspeed || (!root_device->is_root);
@@ -638,7 +641,7 @@ static void __no_inline_not_in_flash_func(configure_root_port)(
   }
 }
 
-static void __no_inline_not_in_flash_func(process_control_transfer)(
+/*static*/ void __no_inline_not_in_flash_func(process_control_transfer)(
     pio_port_t *pp, root_port_t *root, usb_device_t *device) {
   uint8_t addr = device->address;
   control_pipe_t *pipe = &device->control_pipe;
@@ -684,7 +687,7 @@ static void __no_inline_not_in_flash_func(process_control_transfer)(
   }
 }
 
-static void __no_inline_not_in_flash_func(process_interrupt_transfer)(
+/*static*/ void __no_inline_not_in_flash_func(process_interrupt_transfer)(
     pio_port_t *pp, root_port_t *root, usb_device_t *device) {
 
   if (!device->connected || device->root != root) {
@@ -737,7 +740,7 @@ static void __no_inline_not_in_flash_func(process_interrupt_transfer)(
   }
 }
 
-static bool __no_inline_not_in_flash_func(sof_timer)(repeating_timer_t *_rt) {
+/*static*/ bool __no_inline_not_in_flash_func(sof_timer)(repeating_timer_t *_rt) {
   static uint8_t sof_packet[4] = {USB_SYNC, USB_PID_SOF, 0x00, 0x10};
   static uint8_t sof_count = 0;
   UNUSED_PARAMETER(_rt);
@@ -786,6 +789,8 @@ static bool __no_inline_not_in_flash_func(sof_timer)(repeating_timer_t *_rt) {
         (get_port_pin_status(active_root) == PORT_PIN_FS_IDLE ||
          (get_port_pin_status(active_root) == PORT_PIN_LS_IDLE))) {
       active_root->event = EVENT_CONNECT;
+
+      hcd_event_device_attach(root_idx+1, true);
     }
   }
 
@@ -796,7 +801,7 @@ static bool __no_inline_not_in_flash_func(sof_timer)(repeating_timer_t *_rt) {
   return true;
 }
 
-static void on_device_connect(pio_port_t *pp, root_port_t *root,
+/*static*/ void on_device_connect(pio_port_t *pp, root_port_t *root,
                               int device_idx) {
   bool fullspeed_flag = false;
 
@@ -806,6 +811,7 @@ static void on_device_connect(pio_port_t *pp, root_port_t *root,
     fullspeed_flag = false;
   }
 
+#if 0
   pio_sm_set_pins_with_mask(pp->pio_usb_tx, pp->sm_tx, (0b00 << root->pin_dp),
                             (0b11u << root->pin_dp));
   pio_sm_set_pindirs_with_mask(pp->pio_usb_tx, pp->sm_tx, (0b11u << root->pin_dp),
@@ -817,6 +823,9 @@ static void on_device_connect(pio_port_t *pp, root_port_t *root,
                                (0b11u << root->pin_dp));
 
   busy_wait_us(100);
+#endif
+
+  TU_LOG1_INT(fullspeed_flag);
 
   if (fullspeed_flag && get_port_pin_status(root) == PORT_PIN_FS_IDLE) {
     root->root_device = &usb_device[device_idx];
@@ -841,14 +850,14 @@ static void on_device_connect(pio_port_t *pp, root_port_t *root,
   }
 }
 
-static void update_packet_crc16(usb_setup_packet_t * packet) {
+/*static*/ void update_packet_crc16(usb_setup_packet_t * packet) {
   uint16_t crc16 = calc_usb_crc16(&packet->request_type,
                                   sizeof(*packet) - 4);
   packet->crc16[0] = crc16 & 0xff;
   packet->crc16[1] = crc16 >> 8;
 }
 
-static int __no_inline_not_in_flash_func(control_out_protocol)(
+/*static*/ int __no_inline_not_in_flash_func(control_out_protocol)(
     usb_device_t *device, uint8_t *setup_data, uint16_t setup_length,
     uint8_t *out_data, uint16_t out_length) {
   int res = 0;
@@ -890,7 +899,7 @@ static int __no_inline_not_in_flash_func(control_out_protocol)(
   return res;
 }
 
-static int __no_inline_not_in_flash_func(control_in_protocol)(
+/*static*/ int __no_inline_not_in_flash_func(control_in_protocol)(
     usb_device_t *device, uint8_t *tx_data, uint16_t tx_length,
     uint8_t *rx_buffer, uint16_t request_length) {
   int res = 0;
@@ -966,7 +975,7 @@ int __no_inline_not_in_flash_func(pio_usb_set_out_data)(endpoint_t *ep,
   return 0;
 }
 
-static int set_hub_feature(usb_device_t *device, uint8_t port, uint8_t value) {
+/*static*/ int set_hub_feature(usb_device_t *device, uint8_t port, uint8_t value) {
   usb_setup_packet_t req = SET_HUB_FEATURE_REQUEST;
   req.index_lsb = port + 1;
   req.value_lsb = value;
@@ -974,7 +983,7 @@ static int set_hub_feature(usb_device_t *device, uint8_t port, uint8_t value) {
   return control_out_protocol(device, (uint8_t *)&req, sizeof(req), NULL, 0);
 }
 
-static int clear_hub_feature(usb_device_t *device, uint8_t port,
+/*static*/ int clear_hub_feature(usb_device_t *device, uint8_t port,
                              uint8_t value) {
   usb_setup_packet_t req = CLEAR_HUB_FEATURE_REQUEST;
   req.index_lsb = port + 1;
@@ -983,7 +992,7 @@ static int clear_hub_feature(usb_device_t *device, uint8_t port,
   return control_out_protocol(device, (uint8_t *)&req, sizeof(req), NULL, 0);
 }
 
-static int get_hub_port_status(usb_device_t *device, uint8_t port,
+/*static*/ int get_hub_port_status(usb_device_t *device, uint8_t port,
                                hub_port_status_t *status) {
   usb_setup_packet_t req = GET_HUB_PORT_STATUS_REQUEST;
   req.index_lsb = port + 1;
@@ -992,7 +1001,7 @@ static int get_hub_port_status(usb_device_t *device, uint8_t port,
                              sizeof(*status));
 }
 
-static int initialize_hub(usb_device_t *device) {
+/*static*/ int initialize_hub(usb_device_t *device) {
   uint8_t rx_buffer[16];
   int res = 0;
   printf("USB Hub detected\n");
@@ -1017,7 +1026,7 @@ static int initialize_hub(usb_device_t *device) {
   return res;
 }
 
-static int get_string_descriptor(usb_device_t *device, uint8_t idx,
+/*static*/ int get_string_descriptor(usb_device_t *device, uint8_t idx,
                                  uint8_t *rx_buffer, uint8_t *str_buffer) {
   int res = -1;
   usb_setup_packet_t req = GET_DEVICE_DESCRIPTOR_REQ_DEFAULT;
@@ -1050,7 +1059,7 @@ static int get_string_descriptor(usb_device_t *device, uint8_t idx,
   return res;
 }
 
-static int enumerate_device(usb_device_t *device, uint8_t address) {
+/*static*/ int enumerate_device(usb_device_t *device, uint8_t address) {
   int res = 0;
   uint8_t rx_buffer[512];
 
@@ -1074,7 +1083,7 @@ static int enumerate_device(usb_device_t *device, uint8_t address) {
 
   printf("Enumerating %04x:%04x, class:%d, address:%d\n", device->vid,
          device->pid, device->device_class, address);
-
+#if 0
   usb_setup_packet_t set_address_request = SET_ADDRESS_REQ_DEFAULT;
   set_address_request.value_lsb = address;
   set_address_request.value_msb = 0;
@@ -1266,11 +1275,12 @@ static int enumerate_device(usb_device_t *device, uint8_t address) {
     }
     ep->attr &= ~EP_ATTR_ENUMERATING;
   }
+#endif
 
   return res;
 }
 
-static void device_disconnect(usb_device_t *device) {
+/*static*/ void device_disconnect(usb_device_t *device) {
   printf("Disconnect device %d\n", device->address);
   for (int port = 0; port < PIO_USB_HUB_PORT_CNT; port++) {
     if (device->child_devices[port] != 0) {
@@ -1293,7 +1303,7 @@ static void device_disconnect(usb_device_t *device) {
   memset(device, 0, sizeof(*device));
 }
 
-static int device_pool_vacant(void) {
+/*static*/ int device_pool_vacant(void) {
   for (int idx = 0; idx < PIO_USB_DEVICE_CNT; idx++) {
     if (!usb_device[idx].connected) {
       return idx;
@@ -1303,7 +1313,7 @@ static int device_pool_vacant(void) {
   return -1;
 }
 
-static int assign_new_device_to_port(usb_device_t *hub_device, uint8_t port, bool is_ls) {
+/*static*/ int assign_new_device_to_port(usb_device_t *hub_device, uint8_t port, bool is_ls) {
   int idx = device_pool_vacant();
   if (idx >= 0) {
     hub_device->child_devices[port] = idx;
@@ -1322,7 +1332,7 @@ static int assign_new_device_to_port(usb_device_t *hub_device, uint8_t port, boo
   return -1;
 }
 
-static void configure_tx_channel(uint8_t ch, PIO pio, uint sm) {
+/*static*/ void configure_tx_channel(uint8_t ch, PIO pio, uint sm) {
   dma_channel_config conf = dma_channel_get_default_config(ch);
 
   channel_config_set_read_increment(&conf, true);
@@ -1334,7 +1344,7 @@ static void configure_tx_channel(uint8_t ch, PIO pio, uint sm) {
   dma_channel_set_write_addr(ch, &pio->txf[sm], false);
 }
 
-static void apply_config(pio_port_t *pp, const pio_usb_configuration_t *c,
+/*static*/ void apply_config(pio_port_t *pp, const pio_usb_configuration_t *c,
                          root_port_t *port) {
   pp->pio_usb_tx = c->pio_tx_num == 0 ? pio0 : pio1;
   pp->sm_tx = c->sm_tx;
@@ -1346,10 +1356,10 @@ static void apply_config(pio_port_t *pp, const pio_usb_configuration_t *c,
   port->pin_dm = c->pin_dp + 1;
 }
 
-static repeating_timer_t sof_rt;
-static bool timer_active;
+/*static*/ repeating_timer_t sof_rt;
+/*static*/ bool timer_active;
 
-static void start_timer(alarm_pool_t *alarm_pool) {
+/*static*/ void start_timer(alarm_pool_t *alarm_pool) {
   if (timer_active) {
     return;
   }
@@ -1364,12 +1374,12 @@ static void start_timer(alarm_pool_t *alarm_pool) {
   timer_active = true;
 }
 
-static void stop_timer(void) {
+/*static*/ void stop_timer(void) {
   cancel_repeating_timer(&sof_rt);
   timer_active = false;
 }
 
-static void port_pin_drive_setting(const root_port_t *port) {
+/*static*/ void port_pin_drive_setting(const root_port_t *port) {
   gpio_set_slew_rate(port->pin_dp, GPIO_SLEW_RATE_FAST);
   gpio_set_slew_rate(port->pin_dm, GPIO_SLEW_RATE_FAST);
   gpio_set_drive_strength(port->pin_dp, GPIO_DRIVE_STRENGTH_12MA);
@@ -1438,9 +1448,9 @@ int pio_usb_host_add_port(uint8_t pin_dp) {
   return -1;
 }
 
-static volatile bool cancel_timer_flag;
-static volatile bool start_timer_flag;
-static uint32_t int_stat;
+/*static*/ volatile bool cancel_timer_flag;
+/*static*/ volatile bool start_timer_flag;
+/*static*/ uint32_t int_stat;
 
 void pio_usb_host_stop(void) {
   cancel_timer_flag = true;
@@ -1456,7 +1466,7 @@ void pio_usb_host_restart(void) {
   }
 }
 
-static void __no_inline_not_in_flash_func(process_hub_event)(
+/*static*/ void __no_inline_not_in_flash_func(process_hub_event)(
     usb_device_t *device) {
   volatile endpoint_t *ep = pio_usb_get_endpoint(device, 0);
   uint8_t bitmap = ep->buffer[0];
@@ -1521,7 +1531,7 @@ void __no_inline_not_in_flash_func(pio_usb_host_task)(void) {
       printf("Root %d connected\n", root_idx);
       int dev_idx = device_pool_vacant();
       if (dev_idx >= 0) {
-        on_device_connect(&pio_port[0], &root_port[root_idx], dev_idx);
+        //on_device_connect(&pio_port[0], &root_port[root_idx], dev_idx);
         root_port[root_idx].addr0_exists = true;
       }
       root_port[root_idx].event = EVENT_NONE;
@@ -1534,6 +1544,7 @@ void __no_inline_not_in_flash_func(pio_usb_host_task)(void) {
     }
   }
 
+#if 1
   for (int idx = 0; idx < PIO_USB_DEVICE_CNT; idx++) {
     usb_device_t *device = &usb_device[idx];
 
@@ -1568,6 +1579,7 @@ void __no_inline_not_in_flash_func(pio_usb_host_task)(void) {
       process_hub_event(device);
     }
   }
+#endif
 
   if (cancel_timer_flag) {
     int_stat = save_and_disable_interrupts();
@@ -1589,16 +1601,16 @@ void __no_inline_not_in_flash_func(pio_usb_host_task)(void) {
 // Device implementation
 //
 
-static endpoint_t* active_ep = NULL;
-static usb_descriptor_buffers_t descriptor_buffers;
-static int8_t new_devaddr = -1;
-static uint8_t ep0_crc5_lut[16];
+/*static*/ endpoint_t* active_ep = NULL;
+/*static*/ usb_descriptor_buffers_t descriptor_buffers;
+/*static*/ int8_t new_devaddr = -1;
+/*static*/ uint8_t ep0_crc5_lut[16];
 
-static int8_t ep0_desc_request_type = -1;
-static uint16_t ep0_desc_request_len;
-static uint8_t ep0_desc_request_idx;
+/*static*/ int8_t ep0_desc_request_type = -1;
+/*static*/ uint16_t ep0_desc_request_len;
+/*static*/ uint8_t ep0_desc_request_idx;
 
-static void __no_inline_not_in_flash_func(update_ep0_crc5_lut)(uint8_t addr) {
+/*static*/ void __no_inline_not_in_flash_func(update_ep0_crc5_lut)(uint8_t addr) {
   uint16_t dat;
   uint8_t crc;
   for (int epnum = 0; epnum < 16; epnum++) {
@@ -1657,7 +1669,7 @@ static __always_inline endpoint_t *device_receive_token(uint8_t *buffer,
   return NULL;
 }
 
-static void __no_inline_not_in_flash_func(prepare_ep0_data)(uint8_t *data,
+/*static*/ void __no_inline_not_in_flash_func(prepare_ep0_data)(uint8_t *data,
                                                               uint8_t len) {
   usb_device_t *dev = &usb_device[0];
   control_pipe_t *p = &dev->control_pipe;
@@ -1701,7 +1713,7 @@ void pio_usb_device_task(void) {
   }
 }
 
-static int __no_inline_not_in_flash_func(process_device_setup_stage)(
+/*static*/ int __no_inline_not_in_flash_func(process_device_setup_stage)(
     uint8_t *buffer) {
   int res = -1;
   const usb_setup_packet_t *packet = (usb_setup_packet_t *)buffer;
@@ -1761,7 +1773,7 @@ static int __no_inline_not_in_flash_func(process_device_setup_stage)(
   return res;
 }
 
-static void __no_inline_not_in_flash_func(usb_device_packet_handler)(void) {
+/*static*/ void __no_inline_not_in_flash_func(usb_device_packet_handler)(void) {
   static uint8_t token_buf[64];
   static bool wait_ack = false;
   static uint8_t hand_shake_token[] = {USB_SYNC, USB_PID_NAK};
