@@ -424,6 +424,8 @@ void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t add
       if (pp->usb_rx_buffer[1] == USB_PID_DATA1) {
         send_ack(pp);
         pipe->stage = STAGE_COMPLETE;
+      }else if (pp->usb_rx_buffer[1] == USB_PID_STALL) {
+        pipe->stage = STAGE_COMPLETE; // TODO maybe STAGE_ERROR for stall indication
       }
     }
 
