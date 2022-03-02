@@ -1085,7 +1085,6 @@ int __no_inline_not_in_flash_func(pio_usb_set_out_data)(endpoint_t *ep,
 
   printf("Enumerating %04x:%04x, class:%d, address:%d\n", device->vid,
          device->pid, device->device_class, address);
-#if 0
   usb_setup_packet_t set_address_request = SET_ADDRESS_REQ_DEFAULT;
   set_address_request.value_lsb = address;
   set_address_request.value_msb = 0;
@@ -1277,7 +1276,6 @@ int __no_inline_not_in_flash_func(pio_usb_set_out_data)(endpoint_t *ep,
     }
     ep->attr &= ~EP_ATTR_ENUMERATING;
   }
-#endif
 
   return res;
 }
