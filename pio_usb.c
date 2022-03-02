@@ -1533,7 +1533,7 @@ void __no_inline_not_in_flash_func(pio_usb_host_task)(void) {
       printf("Root %d connected\n", root_idx);
       int dev_idx = device_pool_vacant();
       if (dev_idx >= 0) {
-        //on_device_connect(&pio_port[0], &root_port[root_idx], dev_idx);
+        on_device_connect(&pio_port[0], &root_port[root_idx], dev_idx);
         root_port[root_idx].addr0_exists = true;
       }
       root_port[root_idx].event = EVENT_NONE;
@@ -1546,7 +1546,6 @@ void __no_inline_not_in_flash_func(pio_usb_host_task)(void) {
     }
   }
 
-#if 1
   for (int idx = 0; idx < PIO_USB_DEVICE_CNT; idx++) {
     usb_device_t *device = &usb_device[idx];
 
@@ -1581,7 +1580,6 @@ void __no_inline_not_in_flash_func(pio_usb_host_task)(void) {
       process_hub_event(device);
     }
   }
-#endif
 
   if (cancel_timer_flag) {
     int_stat = save_and_disable_interrupts();
