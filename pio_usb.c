@@ -24,8 +24,6 @@
 #include "usb_tx.pio.h"
 #include "usb_rx.pio.h"
 
-#include "tusb.h"
-
 #define UNUSED_PARAMETER(x) (void)x
 
 #define IRQ_TX_EOP_MASK (1 << usb_tx_fs_IRQ_EOP)
@@ -505,21 +503,7 @@ void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t add
 //  PORT_PIN_SE1,
 //} port_pin_status_t;
 
-/*static*/ port_pin_status_t __no_inline_not_in_flash_func(get_port_pin_status)(
-    root_port_t *port) {
-  bool dp = gpio_get(port->pin_dp);
-  bool dm = gpio_get(port->pin_dm);
 
-  if (dp == false && dm == false) {
-    return PORT_PIN_SE0;
-  } else if (dp == true && dm == false) {
-    return PORT_PIN_FS_IDLE;
-  } else if (dp == false && dm == true) {
-    return PORT_PIN_LS_IDLE;
-  }
-
-  return PORT_PIN_SE1;
-}
 
 /*static*/ bool __no_inline_not_in_flash_func(connection_check)(root_port_t *port) {
   if (get_port_pin_status(port) == PORT_PIN_SE0) {
@@ -529,7 +513,8 @@ void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t add
       busy_wait_us_32(1);
       // device disconnect
       port->event = EVENT_DISCONNECT;
-      hcd_event_device_remove(port - root_port + 1, true);
+      port->occupied = false;
+      port->ints |= PIO_USB_INTS_DISCONNECT_BITS;
       return false;
     }
   }
@@ -752,7 +737,7 @@ void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t add
   for (int root_idx = 0; root_idx < PIO_USB_ROOT_PORT_CNT; root_idx++) {
     root_port_t *active_root = &root_port[root_idx];
     usb_device_t *root_device = active_root->root_device;
-    if (!(active_root->initialized && root_device != NULL &&
+    if (!(active_root->initialized && root_device != NULL && active_root->occupied &&
         root_device->connected && connection_check(active_root))) {
       continue;
     }
@@ -788,11 +773,21 @@ void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t add
     }
 
     if (active_root->event == EVENT_NONE &&
+        !active_root->occupied &&
         (get_port_pin_status(active_root) == PORT_PIN_FS_IDLE ||
          (get_port_pin_status(active_root) == PORT_PIN_LS_IDLE))) {
       active_root->event = EVENT_CONNECT;
 
-      hcd_event_device_attach(root_idx+1, true);
+      active_root->occupied = true;
+      active_root->ints |= PIO_USB_INTS_CONNECT_BITS;
+    }
+  }
+
+  for (uint8_t root_idx = 0; root_idx < PIO_USB_ROOT_PORT_CNT; root_idx++) {
+    root_port_t *active_root = &root_port[root_idx];
+
+    if (active_root->ints) {
+      pio_usb_irq_handler(root_idx);
     }
   }
 
@@ -803,6 +798,7 @@ void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t add
   return true;
 }
 
+#if 0
 /*static*/ void on_device_connect(pio_port_t *pp, root_port_t *root,
                               int device_idx) {
   bool fullspeed_flag = false;
@@ -813,7 +809,6 @@ void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t add
     fullspeed_flag = false;
   }
 
-#if 0
   pio_sm_set_pins_with_mask(pp->pio_usb_tx, pp->sm_tx, (0b00 << root->pin_dp),
                             (0b11u << root->pin_dp));
   pio_sm_set_pindirs_with_mask(pp->pio_usb_tx, pp->sm_tx, (0b11u << root->pin_dp),
@@ -825,7 +820,6 @@ void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t add
                                (0b11u << root->pin_dp));
 
   busy_wait_us(100);
-#endif
 
   TU_LOG1_INT(fullspeed_flag);
 
@@ -851,6 +845,7 @@ void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t add
     }
   }
 }
+#endif
 
 /*static*/ void update_packet_crc16(usb_setup_packet_t * packet) {
   uint16_t crc16 = calc_usb_crc16(&packet->request_type,
@@ -976,6 +971,8 @@ int __no_inline_not_in_flash_func(pio_usb_set_out_data)(endpoint_t *ep,
   ep->new_data_flag = true;
   return 0;
 }
+
+#if 0
 
 /*static*/ int set_hub_feature(usb_device_t *device, uint8_t port, uint8_t value) {
   usb_setup_packet_t req = SET_HUB_FEATURE_REQUEST;
@@ -1280,6 +1277,8 @@ int __no_inline_not_in_flash_func(pio_usb_set_out_data)(endpoint_t *ep,
   return res;
 }
 
+#endif
+
 /*static*/ void device_disconnect(usb_device_t *device) {
   printf("Disconnect device %d\n", device->address);
   for (int port = 0; port < PIO_USB_HUB_PORT_CNT; port++) {
@@ -1466,6 +1465,7 @@ void pio_usb_host_restart(void) {
   }
 }
 
+#if 0
 /*static*/ void __no_inline_not_in_flash_func(process_hub_event)(
     usb_device_t *device) {
   volatile endpoint_t *ep = pio_usb_get_endpoint(device, 0);
@@ -1594,6 +1594,7 @@ void __no_inline_not_in_flash_func(pio_usb_host_task)(void) {
     start_timer_flag = false;
   }
 }
+#endif
 
 //
 // Device implementation

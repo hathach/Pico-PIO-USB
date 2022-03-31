@@ -71,13 +71,19 @@ typedef enum {
   EVENT_HUB_PORT_CHANGE,
 } usb_device_event_t;
 
+
+#define PIO_USB_INTS_CONNECT_BITS       (1u << 0)
+#define PIO_USB_INTS_DISCONNECT_BITS    (1u << 1)
+
 typedef struct struct_usb_device_t usb_device_t;
 typedef struct struct_root_port_t {
   volatile bool initialized;
+  volatile bool occupied;
   volatile bool addr0_exists;
   volatile uint pin_dp;
   volatile uint pin_dm;
   volatile usb_device_event_t event;
+  volatile uint32_t ints; // interrupt status
   usb_device_t *root_device;
 } root_port_t;
 
