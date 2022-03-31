@@ -53,6 +53,8 @@ typedef struct {
 } control_pipe_t;
 
 typedef struct {
+  volatile uint8_t root_idx;
+  volatile uint8_t dev_addr;
   volatile uint8_t ep_num;
   volatile uint8_t size;
   volatile uint8_t buffer[64 + 4];
@@ -62,6 +64,11 @@ typedef struct {
   volatile uint8_t interval;
   volatile uint8_t interval_counter;
   volatile uint8_t data_id;  // data0 or data1
+
+  uint8_t* bufptr;
+  uint16_t total_len;
+  uint16_t actual_len;
+  uint8_t crc16[2];
 } endpoint_t;
 
 typedef enum {
@@ -72,19 +79,27 @@ typedef enum {
 } usb_device_event_t;
 
 
-#define PIO_USB_INTS_CONNECT_BITS       (1u << 0)
-#define PIO_USB_INTS_DISCONNECT_BITS    (1u << 1)
+#define PIO_USB_INTS_CONNECT_BITS              (1u << 0)
+#define PIO_USB_INTS_DISCONNECT_BITS           (1u << 1)
+#define PIO_USB_INTS_ENDPOINT_COMPLETE_BITS    (1u << 2)
+#define PIO_USB_INTS_ENDPOINT_ERROR_BITS       (1u << 3)
+
 
 typedef struct struct_usb_device_t usb_device_t;
 typedef struct struct_root_port_t {
   volatile bool initialized;
-  volatile bool occupied;
+  volatile bool connected;
   volatile bool addr0_exists;
+  volatile bool is_fullspeed;
   volatile uint pin_dp;
   volatile uint pin_dm;
   volatile usb_device_event_t event;
-  volatile uint32_t ints; // interrupt status
   usb_device_t *root_device;
+
+  // register interface
+  volatile uint32_t ints; // interrupt status
+  volatile uint32_t ep_complete;
+  volatile uint32_t ep_error;
 } root_port_t;
 
 struct struct_usb_device_t {
