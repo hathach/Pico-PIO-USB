@@ -350,7 +350,9 @@ static uint8_t __no_inline_not_in_flash_func(endpoint_out_prepare_buf)(endpoint_
 
   wait_handshake(pp);
 
-  if (pp->usb_rx_buffer[1] == USB_PID_ACK) {
+  uint8_t const receive_token = pp->usb_rx_buffer[1];
+
+  if (receive_token == USB_PID_ACK) {
     res = 0;
     ep->actual_len += xact_len;
     ep->data_id ^= 1;
@@ -359,7 +361,10 @@ static uint8_t __no_inline_not_in_flash_func(endpoint_out_prepare_buf)(endpoint_
     if ( (xact_len < ep->size) || (ep->actual_len >= ep->total_len) ) {
       endpoint_transfer_finish(ep, PIO_USB_INTS_ENDPOINT_COMPLETE_BITS);
     }
-  } else if (pp->usb_rx_buffer[1] == USB_PID_STALL) {
+  } else if (receive_token == USB_PID_NAK) {
+    res = 0;
+    // NAK try again next frame
+  } else if (receive_token == USB_PID_STALL) {
     res = 0;
     endpoint_transfer_finish(ep, PIO_USB_INTS_ENDPOINT_STALLED_BITS);
   }else {
@@ -457,8 +462,10 @@ static uint8_t __no_inline_not_in_flash_func(endpoint_out_prepare_buf)(endpoint_
   data_transfer(pp, packet, sizeof(packet));
 
   int receive_len = receive_packet_and_ack(pp);
+  uint8_t const receive_token = pp->usb_rx_buffer[1];
+
   if (receive_len >= 0) {
-    if (pp->usb_rx_buffer[1] == expect_token) {
+    if (receive_token == expect_token) {
       memcpy(ep->bufptr+ep->actual_len, &pp->usb_rx_buffer[2], receive_len);
       ep->actual_len += receive_len;
       ep->data_id ^= 1;
@@ -467,19 +474,22 @@ static uint8_t __no_inline_not_in_flash_func(endpoint_out_prepare_buf)(endpoint_
       if ( (receive_len < ep->size) || (ep->actual_len >= ep->total_len) ) {
         endpoint_transfer_finish(ep, PIO_USB_INTS_ENDPOINT_COMPLETE_BITS);
       }
+    }else {
+      // DATA0/1 mismatched
     }
     res = 0;
-  } else {
+  } else if (receive_token == USB_PID_NAK) {
+    res = 0;
+    // NAK try again next frame
+  } else if (receive_token == USB_PID_STALL) {
+    endpoint_transfer_finish(ep, PIO_USB_INTS_ENDPOINT_STALLED_BITS);
+    res = 0;
+  }else {
     res = -1;
     if ((pp->pio_usb_rx->irq & IRQ_RX_COMP_MASK) == 0) {
       res = -2;
     }
-
-    if (pp->usb_rx_buffer[1] == USB_PID_STALL) {
-      endpoint_transfer_finish(ep, PIO_USB_INTS_ENDPOINT_STALLED_BITS);
-    }else {
-      endpoint_transfer_finish(ep, PIO_USB_INTS_ENDPOINT_ERROR_BITS);
-    }
+    endpoint_transfer_finish(ep, PIO_USB_INTS_ENDPOINT_ERROR_BITS);
   }
 
   pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_rx, false);
@@ -1816,12 +1826,6 @@ bool pio_usb_endpoint_send_setup(uint8_t root_idx, uint8_t device_address, uint8
   uint16_t crc16 = calc_usb_crc16(setup_packet, 8);
   ep->crc16[0] = crc16 & 0xff;
   ep->crc16[1] = crc16 >> 8;
-
-//  ep->buffer[0] = USB_SYNC;
-//  ep->buffer[1] = USB_PID_DATA0;
-//  memcpy((uint8_t*) (ep->buffer+2), setup_packet, 8);
-//  update_packet_crc16((usb_setup_packet_t*) ep->buffer);
-//  ep->packet_len = 8+4;
 
   ep->new_data_flag = true;
 
