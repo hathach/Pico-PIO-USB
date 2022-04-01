@@ -359,7 +359,10 @@ static uint8_t __no_inline_not_in_flash_func(endpoint_out_prepare_buf)(endpoint_
     if ( (xact_len < ep->size) || (ep->actual_len >= ep->total_len) ) {
       endpoint_transfer_finish(ep, PIO_USB_INTS_ENDPOINT_COMPLETE_BITS);
     }
-  } else {
+  } else if (pp->usb_rx_buffer[1] == USB_PID_STALL) {
+    res = 0;
+    endpoint_transfer_finish(ep, PIO_USB_INTS_ENDPOINT_STALLED_BITS);
+  }else {
     res = -1;
     endpoint_transfer_finish(ep, PIO_USB_INTS_ENDPOINT_ERROR_BITS);
   }
