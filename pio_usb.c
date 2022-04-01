@@ -297,18 +297,21 @@ void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t add
   return res;
 }
 
-static void __no_inline_not_in_flash_func(endpoint_transfer_complete)(endpoint_t * ep) {
+static void __no_inline_not_in_flash_func(endpoint_transfer_finish)(endpoint_t * ep, uint32_t flag) {
   root_port_t *active_root = &root_port[ep->root_idx];
-  active_root->ints |= PIO_USB_INTS_ENDPOINT_COMPLETE_BITS;
-  active_root->ep_complete |= (1u << (ep-ep_pool));
+  uint32_t const ep_mask = (1u << (ep-ep_pool));
 
-  ep->new_data_flag = false;
-}
+  active_root->ints |= flag;
 
-static void __no_inline_not_in_flash_func(endpoint_transfer_error)(endpoint_t * ep) {
-  root_port_t *active_root = &root_port[ep->root_idx];
-  active_root->ints |= PIO_USB_INTS_ENDPOINT_ERROR_BITS;
-  active_root->ep_error |= (1u << (ep-ep_pool));
+  if (flag == PIO_USB_INTS_ENDPOINT_COMPLETE_BITS) {
+    active_root->ep_complete |= ep_mask;
+  }else if (flag == PIO_USB_INTS_ENDPOINT_ERROR_BITS) {
+    active_root->ep_error |= ep_mask;
+  }else if (flag == PIO_USB_INTS_ENDPOINT_STALLED_BITS) {
+    active_root->ep_stalled |= ep_mask;
+  }else {
+    // something wrong
+  }
 
   ep->new_data_flag = false;
 }
@@ -354,11 +357,11 @@ static uint8_t __no_inline_not_in_flash_func(endpoint_out_prepare_buf)(endpoint_
 
     // complete if all bytes transferred or short packet
     if ( (xact_len < ep->size) || (ep->actual_len >= ep->total_len) ) {
-      endpoint_transfer_complete(ep);
+      endpoint_transfer_finish(ep, PIO_USB_INTS_ENDPOINT_COMPLETE_BITS);
     }
   } else {
     res = -1;
-    endpoint_transfer_error(ep);
+    endpoint_transfer_finish(ep, PIO_USB_INTS_ENDPOINT_ERROR_BITS);
   }
 
   pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_rx, false);
@@ -459,7 +462,7 @@ static uint8_t __no_inline_not_in_flash_func(endpoint_out_prepare_buf)(endpoint_
 
       // complete if all bytes transferred or short packet
       if ( (receive_len < ep->size) || (ep->actual_len >= ep->total_len) ) {
-        endpoint_transfer_complete(ep);
+        endpoint_transfer_finish(ep, PIO_USB_INTS_ENDPOINT_COMPLETE_BITS);
       }
     }
     res = 0;
@@ -469,7 +472,11 @@ static uint8_t __no_inline_not_in_flash_func(endpoint_out_prepare_buf)(endpoint_
       res = -2;
     }
 
-    endpoint_transfer_error(ep);
+    if (pp->usb_rx_buffer[1] == USB_PID_STALL) {
+      endpoint_transfer_finish(ep, PIO_USB_INTS_ENDPOINT_STALLED_BITS);
+    }else {
+      endpoint_transfer_finish(ep, PIO_USB_INTS_ENDPOINT_ERROR_BITS);
+    }
   }
 
   pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_rx, false);
@@ -892,9 +899,9 @@ static uint8_t __no_inline_not_in_flash_func(endpoint_out_prepare_buf)(endpoint_
           ep->actual_len = ep->total_len;
 
           if (pp->usb_rx_buffer[0] == USB_SYNC && pp->usb_rx_buffer[1] == USB_PID_ACK) {
-            endpoint_transfer_complete(ep);
+            endpoint_transfer_finish(ep, PIO_USB_INTS_ENDPOINT_COMPLETE_BITS);
           }else{
-            endpoint_transfer_error(ep);
+            endpoint_transfer_finish(ep, PIO_USB_INTS_ENDPOINT_ERROR_BITS);
           }
 
           pp->usb_rx_buffer[1] = 0;  // reset buffer

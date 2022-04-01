@@ -83,6 +83,7 @@ typedef enum {
 #define PIO_USB_INTS_DISCONNECT_BITS           (1u << 1)
 #define PIO_USB_INTS_ENDPOINT_COMPLETE_BITS    (1u << 2)
 #define PIO_USB_INTS_ENDPOINT_ERROR_BITS       (1u << 3)
+#define PIO_USB_INTS_ENDPOINT_STALLED_BITS     (1u << 4)
 
 
 typedef struct struct_usb_device_t usb_device_t;
@@ -100,6 +101,7 @@ typedef struct struct_root_port_t {
   volatile uint32_t ints; // interrupt status
   volatile uint32_t ep_complete;
   volatile uint32_t ep_error;
+  volatile uint32_t ep_stalled;
 } root_port_t;
 
 struct struct_usb_device_t {
