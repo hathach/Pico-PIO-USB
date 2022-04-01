@@ -11,11 +11,6 @@
 //--------------------------------------------------------------------+
 //
 //--------------------------------------------------------------------+
-extern root_port_t root_port[PIO_USB_ROOT_PORT_CNT];
-#define PIO_USB(_root_idx)    (root_port + _root_idx)
-
-extern endpoint_t ep_pool[PIO_USB_EP_POOL_CNT];
-#define PIO_USB_EP(_ep_idx)     (ep_pool+_ep_idx)
 
 // IRQ Handler
 __attribute__((weak)) void pio_usb_host_irq_handler(uint8_t root_idx);
@@ -40,8 +35,9 @@ static inline void pio_usb_port_reset_end(root_port_t *root, pio_port_t *pp)
 }
 
 
-bool pio_usb_endpoint_open(uint8_t root_idx, uint8_t device_address, uint8_t const *desc_endpoint);
 bool pio_usb_endpoint_send_setup(uint8_t root_idx, uint8_t device_address, uint8_t const setup_packet[8]);
+
+bool pio_usb_endpoint_open(uint8_t root_idx, uint8_t device_address, uint8_t const *desc_endpoint);
 bool pio_usb_endpoint_transfer(uint8_t root_idx, uint8_t device_address, uint8_t ep_address, uint8_t* buffer, uint16_t buflen);
 
 

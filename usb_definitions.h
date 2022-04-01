@@ -1,8 +1,7 @@
 
 #pragma once
 
-#include <stdint.h>
-
+#include <pico/types.h>
 #include "pio_usb_configuration.h"
 
 typedef enum {
@@ -64,11 +63,6 @@ typedef struct {
   volatile uint8_t interval;
   volatile uint8_t interval_counter;
   volatile uint8_t data_id;  // data0 or data1
-
-  uint8_t* bufptr;
-  uint16_t total_len;
-  uint16_t actual_len;
-  uint8_t crc16[2];
 } endpoint_t;
 
 typedef enum {

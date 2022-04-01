@@ -727,10 +727,10 @@ void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t add
   }
 }
 
-extern void endpoint_transfer_finish(endpoint_t * ep, uint32_t flag);
-extern int __no_inline_not_in_flash_func(endpoint_in_transaction)(pio_port_t* pp, endpoint_t * ep);
-extern uint8_t __no_inline_not_in_flash_func(endpoint_out_prepare_buf)(endpoint_t * ep, uint8_t* buf);
-extern int __no_inline_not_in_flash_func(endpoint_out_transaction)(pio_port_t* pp, endpoint_t * ep);
+extern void endpoint_transfer_finish(pio_hw_endpoint_t * ep, uint32_t flag);
+extern int __no_inline_not_in_flash_func(endpoint_in_transaction)(pio_port_t* pp, pio_hw_endpoint_t * ep);
+extern uint8_t __no_inline_not_in_flash_func(endpoint_out_prepare_buf)(pio_hw_endpoint_t * ep, uint8_t* buf);
+extern int __no_inline_not_in_flash_func(endpoint_out_transaction)(pio_port_t* pp, pio_hw_endpoint_t * ep);
 
 /*static*/ bool __no_inline_not_in_flash_func(sof_timer)(repeating_timer_t *_rt) {
   static uint8_t sof_packet[4] = {USB_SYNC, USB_PID_SOF, 0x00, 0x10};
@@ -773,7 +773,7 @@ extern int __no_inline_not_in_flash_func(endpoint_out_transaction)(pio_port_t* p
 #else
     // execute all queued endpoint
     for (int ep_pool_idx = 0; ep_pool_idx < PIO_USB_EP_POOL_CNT; ep_pool_idx++) {
-      endpoint_t *ep = &ep_pool[ep_pool_idx];
+      pio_hw_endpoint_t *ep = PIO_USB_HW_EP(ep_pool_idx);
 
       if (ep->root_idx == root_idx && ep->size && ep->new_data_flag) {
         if (ep->ep_num == 0 && ep->data_id == USB_PID_SETUP) {

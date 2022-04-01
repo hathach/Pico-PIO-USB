@@ -49,10 +49,10 @@ port_pin_status_t __no_inline_not_in_flash_func(get_port_pin_status)(
   return PORT_PIN_SE1;
 }
 
-endpoint_t* _get_ep(uint8_t root_idx, uint8_t device_address, uint8_t ep_address) {
+pio_hw_endpoint_t* _get_ep(uint8_t root_idx, uint8_t device_address, uint8_t ep_address) {
   for (int ep_pool_idx = 0; ep_pool_idx < PIO_USB_EP_POOL_CNT; ep_pool_idx++)
   {
-    endpoint_t *ep = &ep_pool[ep_pool_idx];
+    pio_hw_endpoint_t *ep = PIO_USB_HW_EP(ep_pool_idx);
     if ( (ep->root_idx == root_idx) && (ep->dev_addr == device_address) &&
          ((ep->ep_num == ep_address) || (((ep_address & 0x7f) == 0) && ((ep->ep_num & 0x7f) == 0)) ) ) {
       return ep;
@@ -65,16 +65,16 @@ endpoint_t* _get_ep(uint8_t root_idx, uint8_t device_address, uint8_t ep_address
 bool pio_usb_endpoint_open(uint8_t root_idx, uint8_t device_address, uint8_t const* desc_endpoint) {
   const endpoint_descriptor_t *d = (const endpoint_descriptor_t *) desc_endpoint;
 
-  endpoint_t *ep = NULL;
+  pio_hw_endpoint_t *ep = NULL;
 
   if (device_address == 0) {
     // dedicate first endpoint for address0
-    ep = &ep_pool[0];
+    ep = PIO_USB_HW_EP(0);
   }else {
     for (int ep_pool_idx = 1; ep_pool_idx < PIO_USB_EP_POOL_CNT; ep_pool_idx++) {
       // ep size is used as valid indicator
-      if (ep_pool[ep_pool_idx].size == 0) {
-        ep = &ep_pool[ep_pool_idx];
+      if (PIO_USB_HW_EP(ep_pool_idx)->size == 0) {
+        ep = PIO_USB_HW_EP(ep_pool_idx);
         break;
       }
     }
@@ -97,7 +97,7 @@ bool pio_usb_endpoint_open(uint8_t root_idx, uint8_t device_address, uint8_t con
 }
 
 bool pio_usb_endpoint_send_setup(uint8_t root_idx, uint8_t device_address, uint8_t const setup_packet[8]) {
-  endpoint_t *ep = _get_ep(root_idx, device_address, 0);
+  pio_hw_endpoint_t *ep = _get_ep(root_idx, device_address, 0);
   if (!ep) return false;
 
   ep->ep_num = 0; // setup is is OUT
@@ -117,7 +117,7 @@ bool pio_usb_endpoint_send_setup(uint8_t root_idx, uint8_t device_address, uint8
 }
 
 bool pio_usb_endpoint_transfer(uint8_t root_idx, uint8_t device_address, uint8_t ep_address, uint8_t* buffer, uint16_t buflen) {
-  endpoint_t *ep = _get_ep(root_idx, device_address, ep_address);
+  pio_hw_endpoint_t *ep = _get_ep(root_idx, device_address, ep_address);
   if (!ep) {
     printf("no endpoint 0x%02X\r\n", ep_address);
     return false;
@@ -144,9 +144,9 @@ bool pio_usb_endpoint_transfer(uint8_t root_idx, uint8_t device_address, uint8_t
   return true;
 }
 
-/*static*/ void __no_inline_not_in_flash_func(endpoint_transfer_finish)(endpoint_t * ep, uint32_t flag) {
+/*static*/ void __no_inline_not_in_flash_func(endpoint_transfer_finish)(pio_hw_endpoint_t * ep, uint32_t flag) {
   root_port_t *active_root = &root_port[ep->root_idx];
-  uint32_t const ep_mask = (1u << (ep-ep_pool));
+  uint32_t const ep_mask = (1u << (ep-pio_hw_ep_pool));
 
   active_root->ints |= flag;
 
@@ -163,7 +163,7 @@ bool pio_usb_endpoint_transfer(uint8_t root_idx, uint8_t device_address, uint8_t
   ep->new_data_flag = false;
 }
 
-/*static*/ int __no_inline_not_in_flash_func(endpoint_in_transaction)(pio_port_t* pp, endpoint_t * ep) {
+/*static*/ int __no_inline_not_in_flash_func(endpoint_in_transaction)(pio_port_t* pp, pio_hw_endpoint_t * ep) {
   int res = -1;
 
   uint8_t expect_token = ep->data_id == 0 ? USB_PID_DATA0 : USB_PID_DATA1;
@@ -209,7 +209,7 @@ bool pio_usb_endpoint_transfer(uint8_t root_idx, uint8_t device_address, uint8_t
   return res;
 }
 
-/*static*/ uint8_t __no_inline_not_in_flash_func(endpoint_out_prepare_buf)(endpoint_t * ep, uint8_t* buf) {
+/*static*/ uint8_t __no_inline_not_in_flash_func(endpoint_out_prepare_buf)(pio_hw_endpoint_t * ep, uint8_t* buf) {
   buf[0] = USB_SYNC;
   buf[1] = ep->data_id ? USB_PID_DATA1 : USB_PID_DATA0;
 
@@ -225,7 +225,7 @@ bool pio_usb_endpoint_transfer(uint8_t root_idx, uint8_t device_address, uint8_t
   return (uint8_t) xact_len;
 }
 
-/*static*/ int __no_inline_not_in_flash_func(endpoint_out_transaction)(pio_port_t* pp, endpoint_t * ep) {
+/*static*/ int __no_inline_not_in_flash_func(endpoint_out_transaction)(pio_port_t* pp, pio_hw_endpoint_t * ep) {
   int res = -1;
 
   uint8_t out_buf[64+4];
