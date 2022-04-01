@@ -52,8 +52,6 @@ typedef struct {
 } control_pipe_t;
 
 typedef struct {
-  volatile uint8_t root_idx;
-  volatile uint8_t dev_addr;
   volatile uint8_t ep_num;
   volatile uint8_t size;
   volatile uint8_t buffer[64 + 4];

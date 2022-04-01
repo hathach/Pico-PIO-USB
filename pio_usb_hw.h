@@ -22,7 +22,7 @@ typedef struct {
   volatile uint8_t interval_counter;
   volatile uint8_t data_id;  // data0 or data1
 
-  volatile bool new_data_flag;
+  volatile bool active;
   uint8_t* bufptr;
   uint16_t total_len;
   uint16_t actual_len;

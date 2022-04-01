@@ -775,7 +775,7 @@ extern int __no_inline_not_in_flash_func(endpoint_out_transaction)(pio_port_t* p
     for (int ep_pool_idx = 0; ep_pool_idx < PIO_USB_EP_POOL_CNT; ep_pool_idx++) {
       pio_hw_endpoint_t *ep = PIO_USB_HW_EP(ep_pool_idx);
 
-      if (ep->root_idx == root_idx && ep->size && ep->new_data_flag) {
+      if (ep->root_idx == root_idx && ep->size && ep->active) {
         if (ep->ep_num == 0 && ep->data_id == USB_PID_SETUP) {
           // Send setup packet
           ep->data_id = 0; // DATA0

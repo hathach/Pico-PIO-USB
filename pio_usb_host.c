@@ -111,7 +111,7 @@ bool pio_usb_endpoint_send_setup(uint8_t root_idx, uint8_t device_address, uint8
   ep->crc16[0] = crc16 & 0xff;
   ep->crc16[1] = crc16 >> 8;
 
-  ep->new_data_flag = true;
+  ep->active = true;
 
   return true;
 }
@@ -139,7 +139,7 @@ bool pio_usb_endpoint_transfer(uint8_t root_idx, uint8_t device_address, uint8_t
   ep->crc16[0] = crc16 & 0xff;
   ep->crc16[1] = crc16 >> 8;
 
-  ep->new_data_flag = true;
+  ep->active = true;
 
   return true;
 }
@@ -160,7 +160,7 @@ bool pio_usb_endpoint_transfer(uint8_t root_idx, uint8_t device_address, uint8_t
     // something wrong
   }
 
-  ep->new_data_flag = false;
+  ep->active = false;
 }
 
 /*static*/ int __no_inline_not_in_flash_func(endpoint_in_transaction)(pio_port_t* pp, pio_hw_endpoint_t * ep) {
