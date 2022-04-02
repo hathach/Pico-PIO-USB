@@ -8,14 +8,34 @@
 #include "usb_definitions.h"
 #include "pio_usb_configuration.h"
 
+enum {
+  PIO_USB_INTS_CONNECT_POS = 0,
+  PIO_USB_INTS_DISCONNECT_POS,
+  PIO_USB_INTS_RESET_END_POS,
+  PIO_USB_INTS_ENDPOINT_COMPLETE_POS,
+  PIO_USB_INTS_ENDPOINT_ERROR_POS,
+  PIO_USB_INTS_ENDPOINT_STALLED_POS,
+};
+
+#define PIO_USB_INTS_CONNECT_BITS              (1u << PIO_USB_INTS_CONNECT_POS)
+#define PIO_USB_INTS_DISCONNECT_BITS           (1u << PIO_USB_INTS_DISCONNECT_POS)
+#define PIO_USB_INTS_RESET_END_BITS            (1u << PIO_USB_INTS_RESET_END_POS)
+
+#define PIO_USB_INTS_ENDPOINT_COMPLETE_BITS    (1u << PIO_USB_INTS_ENDPOINT_COMPLETE_POS)
+#define PIO_USB_INTS_ENDPOINT_ERROR_BITS       (1u << PIO_USB_INTS_ENDPOINT_ERROR_POS)
+#define PIO_USB_INTS_ENDPOINT_STALLED_BITS     (1u << PIO_USB_INTS_ENDPOINT_STALLED_POS)
+
+
 //--------------------------------------------------------------------+
 //
 //--------------------------------------------------------------------+
 
 typedef struct {
   volatile bool initialized;
-  volatile bool connected;
   volatile bool is_fullspeed;
+  volatile bool connected;
+  volatile bool suspended;
+
   volatile uint pin_dp;
   volatile uint pin_dm;
 
@@ -49,5 +69,10 @@ extern pio_hw_root_port_t pio_hw_root_port[PIO_USB_ROOT_PORT_CNT];
 extern pio_hw_endpoint_t pio_hw_ep_pool[PIO_USB_EP_POOL_CNT];
 #define PIO_USB_HW_EP(_idx)     (pio_hw_ep_pool+_idx)
 
+extern pio_port_t pio_port[1];
+#define PIO_USB_HW_PIO(_idx)    (pio_port + _idx)
+
 port_pin_status_t pio_hw_get_line_state(pio_hw_root_port_t* hw_root);
 
+void pio_usb_hw_port_reset_start(uint8_t root_idx);
+void pio_usb_hw_port_reset_end(uint8_t root_idx);

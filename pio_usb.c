@@ -505,7 +505,21 @@ void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t add
 //  PORT_PIN_SE1,
 //} port_pin_status_t;
 
+port_pin_status_t __no_inline_not_in_flash_func(get_port_pin_status)(
+    root_port_t *port) {
+  bool dp = gpio_get(port->pin_dp);
+  bool dm = gpio_get(port->pin_dm);
 
+  if (dp == false && dm == false) {
+    return PORT_PIN_SE0;
+  } else if (dp == true && dm == false) {
+    return PORT_PIN_FS_IDLE;
+  } else if (dp == false && dm == true) {
+    return PORT_PIN_LS_IDLE;
+  }
+
+  return PORT_PIN_SE1;
+}
 
 /*static*/ bool __no_inline_not_in_flash_func(connection_check)(pio_hw_root_port_t *port) {
   if (pio_hw_get_line_state(port) == PORT_PIN_SE0) {
@@ -580,7 +594,7 @@ void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t add
 }
 
 /*static*/ void __no_inline_not_in_flash_func(configure_fullspeed_host)(
-    pio_port_t *pp, const pio_usb_configuration_t *c, root_port_t *port) {
+    pio_port_t *pp, const pio_usb_configuration_t *c, pio_hw_root_port_t *port) {
   override_pio_program(pp->pio_usb_tx, &usb_tx_fs_program, pp->offset_tx);
   SM_SET_CLKDIV(pp->pio_usb_tx, pp->sm_tx, pp->clk_div_fs_tx);
 
@@ -600,7 +614,7 @@ void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t add
 }
 
 /*static*/ void __no_inline_not_in_flash_func(configure_lowspeed_host)(
-    pio_port_t *pp, const pio_usb_configuration_t *c, root_port_t *port) {
+    pio_port_t *pp, const pio_usb_configuration_t *c, pio_hw_root_port_t *port) {
   override_pio_program(pp->pio_usb_tx, &usb_tx_ls_program, pp->offset_tx);
   SM_SET_CLKDIV(pp->pio_usb_tx, pp->sm_tx, pp->clk_div_ls_tx);
 
@@ -620,10 +634,8 @@ void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t add
 }
 
 /*static*/ void __no_inline_not_in_flash_func(configure_root_port)(
-    pio_port_t *pp, root_port_t *root) {
-  usb_device_t *root_device = root->root_device;
-  bool is_fs = root_device->is_fullspeed || (!root_device->is_root);
-  if (is_fs) {
+    pio_port_t *pp, pio_hw_root_port_t *root) {
+  if (root->is_fullspeed) {
     configure_fullspeed_host(pp, &current_config, root);
   } else {
     configure_lowspeed_host(pp, &current_config, root);
@@ -741,27 +753,28 @@ extern int __no_inline_not_in_flash_func(endpoint_out_transaction)(pio_port_t* p
 
   pio_port_t *pp = &pio_port[0];
 
+  // Send SOF
   for (int root_idx = 0; root_idx < PIO_USB_ROOT_PORT_CNT; root_idx++) {
     root_port_t *active_root = &root_port[root_idx];
     pio_hw_root_port_t *hw_root = PIO_USB_HW_RPORT(root_idx);
-    usb_device_t *root_device = active_root->root_device;
+    //usb_device_t *root_device = active_root->root_device;
     if (!(hw_root->initialized && hw_root->connected && 
-        root_device->connected && connection_check(hw_root))) {
+         !hw_root->suspended && connection_check(hw_root))) {
       continue;
     }
-    configure_root_port(pp, active_root);
+    configure_root_port(pp, hw_root);
     usb_transfer(pp, sof_packet, 4);
   }
 
   for (int root_idx = 0; root_idx < PIO_USB_ROOT_PORT_CNT; root_idx++) {
     root_port_t *active_root = &root_port[root_idx];
-    usb_device_t *root_device = active_root->root_device;
-    if (!(active_root->initialized && root_device != NULL &&
-        root_device->connected)) {
+    pio_hw_root_port_t *hw_root = PIO_USB_HW_RPORT(root_idx);
+    //usb_device_t *root_device = active_root->root_device;
+    if (!(hw_root->initialized && hw_root->connected && !hw_root->suspended)) {
       continue;
     }
 
-    configure_root_port(pp, active_root);
+    configure_root_port(pp, hw_root);
 
 #if 0
     for (int idx = 0; idx < PIO_USB_DEVICE_CNT; idx++) {
@@ -818,6 +831,7 @@ extern int __no_inline_not_in_flash_func(endpoint_out_transaction)(pio_port_t* p
       if ( line_state == PORT_PIN_FS_IDLE || line_state == PORT_PIN_LS_IDLE) {
         hw_root->is_fullspeed = (line_state == PORT_PIN_FS_IDLE);
         hw_root->connected = true;
+        hw_root->suspended = true; // need a bus reset before operating
         hw_root->ints |= PIO_USB_INTS_CONNECT_BITS;
       }
     }

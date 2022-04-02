@@ -33,22 +33,6 @@ extern void __no_inline_not_in_flash_func(send_out_token)(const pio_port_t *pp,
 extern int __no_inline_not_in_flash_func(receive_packet_and_ack)(pio_port_t* pp);
 extern void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t addr, uint8_t ep_num);
 
-port_pin_status_t __no_inline_not_in_flash_func(get_port_pin_status)(
-    root_port_t *port) {
-  bool dp = gpio_get(port->pin_dp);
-  bool dm = gpio_get(port->pin_dm);
-
-  if (dp == false && dm == false) {
-    return PORT_PIN_SE0;
-  } else if (dp == true && dm == false) {
-    return PORT_PIN_FS_IDLE;
-  } else if (dp == false && dm == true) {
-    return PORT_PIN_LS_IDLE;
-  }
-
-  return PORT_PIN_SE1;
-}
-
 pio_hw_endpoint_t* _get_ep(uint8_t root_idx, uint8_t device_address, uint8_t ep_address) {
   for (int ep_pool_idx = 0; ep_pool_idx < PIO_USB_EP_POOL_CNT; ep_pool_idx++)
   {
