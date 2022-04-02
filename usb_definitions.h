@@ -81,19 +81,12 @@ typedef enum {
 typedef struct struct_usb_device_t usb_device_t;
 typedef struct struct_root_port_t {
   volatile bool initialized;
-  volatile bool connected;
   volatile bool addr0_exists;
   volatile bool is_fullspeed;
   volatile uint pin_dp;
   volatile uint pin_dm;
   volatile usb_device_event_t event;
   usb_device_t *root_device;
-
-  // register interface
-  volatile uint32_t ints; // interrupt status
-  volatile uint32_t ep_complete;
-  volatile uint32_t ep_error;
-  volatile uint32_t ep_stalled;
 } root_port_t;
 
 struct struct_usb_device_t {
@@ -395,8 +388,8 @@ typedef struct {
 } pio_port_t;
 
 typedef enum{
-  PORT_PIN_SE0,
-  PORT_PIN_FS_IDLE,
-  PORT_PIN_LS_IDLE,
-  PORT_PIN_SE1,
+  PORT_PIN_SE0 = 0b00,
+  PORT_PIN_LS_IDLE = 0b01,
+  PORT_PIN_FS_IDLE = 0b10,
+  PORT_PIN_SE1 = 0b11,
 } port_pin_status_t;

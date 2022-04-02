@@ -145,17 +145,17 @@ bool pio_usb_endpoint_transfer(uint8_t root_idx, uint8_t device_address, uint8_t
 }
 
 /*static*/ void __no_inline_not_in_flash_func(endpoint_transfer_finish)(pio_hw_endpoint_t * ep, uint32_t flag) {
-  root_port_t *active_root = &root_port[ep->root_idx];
+  pio_hw_root_port_t *hw_root = PIO_USB_HW_RPORT(ep->root_idx);
   uint32_t const ep_mask = (1u << (ep-pio_hw_ep_pool));
 
-  active_root->ints |= flag;
+  hw_root->ints |= flag;
 
   if (flag == PIO_USB_INTS_ENDPOINT_COMPLETE_BITS) {
-    active_root->ep_complete |= ep_mask;
+    hw_root->ep_complete |= ep_mask;
   }else if (flag == PIO_USB_INTS_ENDPOINT_ERROR_BITS) {
-    active_root->ep_error |= ep_mask;
+    hw_root->ep_error |= ep_mask;
   }else if (flag == PIO_USB_INTS_ENDPOINT_STALLED_BITS) {
-    active_root->ep_stalled |= ep_mask;
+    hw_root->ep_stalled |= ep_mask;
   }else {
     // something wrong
   }

@@ -24,6 +24,8 @@
 #include "usb_tx.pio.h"
 #include "usb_rx.pio.h"
 
+#include "tusb.h" // for logging
+
 #define UNUSED_PARAMETER(x) (void)x
 
 #define IRQ_TX_EOP_MASK (1 << usb_tx_fs_IRQ_EOP)
@@ -505,14 +507,14 @@ void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t add
 
 
 
-/*static*/ bool __no_inline_not_in_flash_func(connection_check)(root_port_t *port) {
-  if (get_port_pin_status(port) == PORT_PIN_SE0) {
+/*static*/ bool __no_inline_not_in_flash_func(connection_check)(pio_hw_root_port_t *port) {
+  if (pio_hw_get_line_state(port) == PORT_PIN_SE0) {
     busy_wait_us_32(1);
 
-    if (get_port_pin_status(port) == PORT_PIN_SE0) {
+    if (pio_hw_get_line_state(port) == PORT_PIN_SE0) {
       busy_wait_us_32(1);
       // device disconnect
-      port->event = EVENT_DISCONNECT;
+      //port->event = EVENT_DISCONNECT;
       port->connected = false;
       port->ints |= PIO_USB_INTS_DISCONNECT_BITS;
       return false;
@@ -741,9 +743,10 @@ extern int __no_inline_not_in_flash_func(endpoint_out_transaction)(pio_port_t* p
 
   for (int root_idx = 0; root_idx < PIO_USB_ROOT_PORT_CNT; root_idx++) {
     root_port_t *active_root = &root_port[root_idx];
+    pio_hw_root_port_t *hw_root = PIO_USB_HW_RPORT(root_idx);
     usb_device_t *root_device = active_root->root_device;
-    if (!(active_root->initialized && root_device != NULL && active_root->connected &&
-        root_device->connected && connection_check(active_root))) {
+    if (!(hw_root->initialized && hw_root->connected && 
+        root_device->connected && connection_check(hw_root))) {
       continue;
     }
     configure_root_port(pp, active_root);
@@ -807,28 +810,22 @@ extern int __no_inline_not_in_flash_func(endpoint_out_transaction)(pio_port_t* p
 #endif
   }
 
+  // check for new connection to root hub
   for (int root_idx = 0; root_idx < PIO_USB_ROOT_PORT_CNT; root_idx++) {
-    root_port_t *active_root = &root_port[root_idx];
-    if ((!active_root->initialized) || (active_root->root_device != NULL)) {
-      continue;
-    }
-
-    port_pin_status_t line_state = get_port_pin_status(active_root);
-    if (active_root->event == EVENT_NONE &&
-        !active_root->connected &&
-        (line_state == PORT_PIN_FS_IDLE || line_state == PORT_PIN_LS_IDLE)) {
-      active_root->event = EVENT_CONNECT;
-
-      active_root->is_fullspeed = (line_state == PORT_PIN_FS_IDLE);
-      active_root->connected = true;
-      active_root->ints |= PIO_USB_INTS_CONNECT_BITS;
+    pio_hw_root_port_t *hw_root = PIO_USB_HW_RPORT(root_idx);
+    if ( hw_root->initialized && !hw_root->connected) {
+      port_pin_status_t const line_state = pio_hw_get_line_state(hw_root);
+      if ( line_state == PORT_PIN_FS_IDLE || line_state == PORT_PIN_LS_IDLE) {
+        hw_root->is_fullspeed = (line_state == PORT_PIN_FS_IDLE);
+        hw_root->connected = true;
+        hw_root->ints |= PIO_USB_INTS_CONNECT_BITS;
+      }
     }
   }
 
+  // Invoke IRQHandler if interrupt status is set
   for (uint8_t root_idx = 0; root_idx < PIO_USB_ROOT_PORT_CNT; root_idx++) {
-    root_port_t *active_root = &root_port[root_idx];
-
-    if (active_root->ints) {
+    if (PIO_USB_HW_RPORT(root_idx)->ints) {
       pio_usb_host_irq_handler(root_idx);
     }
   }
@@ -1447,6 +1444,10 @@ usb_device_t *pio_usb_host_init(const pio_usb_configuration_t *c) {
   port_pin_drive_setting(&root_port[0]);
   root_port[0].initialized = true;
 
+  PIO_USB_HW_RPORT(0)->initialized = true;
+  PIO_USB_HW_RPORT(0)->pin_dp = c->pin_dp;
+  PIO_USB_HW_RPORT(0)->pin_dm = c->pin_dp+1;
+
   pio_calculate_clkdiv_from_float((float)clock_get_hz(clk_sys) / 48000000,
                                   &pp->clk_div_fs_tx.div_int,
                                   &pp->clk_div_fs_tx.div_frac);
@@ -1473,6 +1474,10 @@ int pio_usb_host_add_port(uint8_t pin_dp) {
     if (!root_port[idx].initialized) {
       root_port[idx].pin_dp = pin_dp;
       root_port[idx].pin_dm = pin_dp + 1;
+
+      PIO_USB_HW_RPORT(idx)->pin_dp = pin_dp;
+      PIO_USB_HW_RPORT(idx)->pin_dm = pin_dp+1;
+
       gpio_pull_down(pin_dp);
       gpio_pull_down(pin_dp + 1);
       pio_gpio_init(pio_port[0].pio_usb_tx, pin_dp);
