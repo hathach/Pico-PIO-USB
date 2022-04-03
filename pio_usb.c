@@ -260,6 +260,7 @@ void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t add
   pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_rx, false);
 }
 
+#if 0
 /*static*/ int __no_inline_not_in_flash_func(usb_out_transaction)(pio_port_t* pp, uint8_t addr, endpoint_t * ep) {
   int res = -1;
 
@@ -288,6 +289,7 @@ void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t add
 
   return res;
 }
+#endif
 
 /*static*/ int __no_inline_not_in_flash_func(receive_packet_and_ack)(pio_port_t* pp) {
   uint16_t crc = 0xffff;
