@@ -173,7 +173,6 @@ void pio_usb_host_controller_init(const pio_usb_configuration_t *c)
     if (pio_hw_get_line_state(port) == PORT_PIN_SE0) {
       busy_wait_us_32(1);
       // device disconnect
-      //port->event = EVENT_DISCONNECT;
       port->connected = false;
       port->suspended = true;
       port->ints |= PIO_USB_INTS_DISCONNECT_BITS;
@@ -261,11 +260,10 @@ void pio_usb_host_controller_init(const pio_usb_configuration_t *c)
 //--------------------------------------------------------------------+
 
 pio_hw_endpoint_t* _get_ep(uint8_t root_idx, uint8_t device_address, uint8_t ep_address) {
-  for (int ep_pool_idx = 0; ep_pool_idx < PIO_USB_EP_POOL_CNT; ep_pool_idx++)
-  {
+  for (int ep_pool_idx = 0; ep_pool_idx < PIO_USB_EP_POOL_CNT; ep_pool_idx++) {
     pio_hw_endpoint_t *ep = PIO_USB_HW_EP(ep_pool_idx);
     // note 0x00 and 0x80 are matched as control endpoint of opposite direction
-    if ( (ep->root_idx == root_idx) && (ep->dev_addr == device_address) &&
+    if ( (ep->root_idx == root_idx) && (ep->dev_addr == device_address) && ep->size &&
          ((ep->ep_num == ep_address) || (((ep_address & 0x7f) == 0) && ((ep->ep_num & 0x7f) == 0)) ) ) {
       return ep;
     }
@@ -306,6 +304,16 @@ bool pio_usb_endpoint_open(uint8_t root_idx, uint8_t device_address, uint8_t con
   ep->data_id = 0;
 
   return true;
+}
+
+void pio_usb_host_close_device(uint8_t root_idx, uint8_t device_address)
+{
+  for (int ep_pool_idx = 0; ep_pool_idx < PIO_USB_EP_POOL_CNT; ep_pool_idx++) {
+    pio_hw_endpoint_t *ep = PIO_USB_HW_EP(ep_pool_idx);
+    if ( (ep->root_idx == root_idx) && (ep->dev_addr == device_address) && ep->size){
+      ep->size = 0;
+    }
+  }
 }
 
 bool pio_usb_endpoint_send_setup(uint8_t root_idx, uint8_t device_address, uint8_t const setup_packet[8]) {

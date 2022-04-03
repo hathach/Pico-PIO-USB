@@ -12,10 +12,12 @@
 //
 //--------------------------------------------------------------------+
 
-void pio_usb_host_controller_init(const pio_usb_configuration_t *c);
-
 // IRQ Handler
 __attribute__((weak)) void pio_usb_host_irq_handler(uint8_t root_idx);
+
+void pio_usb_host_controller_init(const pio_usb_configuration_t *c);
+
+void pio_usb_host_close_device(uint8_t root_idx, uint8_t device_address);
 
 bool pio_usb_endpoint_send_setup(uint8_t root_idx, uint8_t device_address, uint8_t const setup_packet[8]);
 bool pio_usb_endpoint_open(uint8_t root_idx, uint8_t device_address, uint8_t const *desc_endpoint);
