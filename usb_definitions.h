@@ -356,18 +356,21 @@ typedef struct {
 } pio_clk_div_t;
 
 typedef struct {
-  PIO pio_usb_tx;  // colud not set to volatile
+  PIO pio_usb_tx;  // could not set to volatile
   uint sm_tx;
   uint offset_tx;
   uint tx_ch;
 
-  PIO pio_usb_rx;  // colud not set to volatile
+  PIO pio_usb_rx;  // could not set to volatile
   uint sm_rx;
   uint offset_rx;
   uint sm_eop;
   uint offset_eop;
   uint rx_reset_instr;
   uint device_rx_irq_num;
+
+  int8_t debug_pin_rx;
+  int8_t debug_pin_eop;
 
   pio_clk_div_t clk_div_fs_tx;
   pio_clk_div_t clk_div_fs_rx;
