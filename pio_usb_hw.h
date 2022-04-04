@@ -49,6 +49,8 @@ typedef struct {
 typedef struct {
   volatile uint8_t root_idx;
   volatile uint8_t dev_addr;
+           bool    need_pre;
+
   volatile uint8_t ep_num;
   volatile uint8_t size;
   volatile uint8_t attr;
