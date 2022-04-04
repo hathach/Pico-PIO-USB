@@ -118,7 +118,7 @@ void pio_usb_host_controller_init(const pio_usb_configuration_t *c)
 }
 
 /*static*/ void __no_inline_not_in_flash_func(configure_fullspeed_host)(
-    pio_port_t *pp, pio_hw_root_port_t *port) {
+    pio_port_t const *pp, pio_hw_root_port_t *port) {
   override_pio_program(pp->pio_usb_tx, &usb_tx_fs_program, pp->offset_tx);
   SM_SET_CLKDIV(pp->pio_usb_tx, pp->sm_tx, pp->clk_div_fs_tx);
 
@@ -138,7 +138,7 @@ void pio_usb_host_controller_init(const pio_usb_configuration_t *c)
 }
 
 /*static*/ void __no_inline_not_in_flash_func(configure_lowspeed_host)(
-    pio_port_t *pp, pio_hw_root_port_t *port) {
+    pio_port_t const *pp, pio_hw_root_port_t *port) {
   override_pio_program(pp->pio_usb_tx, &usb_tx_ls_program, pp->offset_tx);
   SM_SET_CLKDIV(pp->pio_usb_tx, pp->sm_tx, pp->clk_div_ls_tx);
 
@@ -164,6 +164,20 @@ void pio_usb_host_controller_init(const pio_usb_configuration_t *c)
   } else {
     configure_lowspeed_host(pp, root);
   }
+}
+
+/*static*/ void __no_inline_not_in_flash_func(restore_fs_bus)(const pio_port_t *pp) {
+  // change bus speed to full-speed
+  pio_sm_set_enabled(pp->pio_usb_tx, pp->sm_tx, false);
+  SM_SET_CLKDIV(pp->pio_usb_tx, pp->sm_tx, pp->clk_div_fs_tx);
+
+  pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_rx, false);
+  SM_SET_CLKDIV(pp->pio_usb_rx, pp->sm_rx, pp->clk_div_fs_rx);
+  pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_rx, true);
+
+  pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_eop, false);
+  SM_SET_CLKDIV(pp->pio_usb_rx, pp->sm_eop, pp->clk_div_fs_rx);
+  pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_eop, true);
 }
 
 /*static*/ bool __no_inline_not_in_flash_func(connection_check)(pio_hw_root_port_t *port) {
@@ -216,6 +230,10 @@ void pio_usb_host_controller_init(const pio_usb_configuration_t *c)
       if (ep->root_idx == root_idx && ep->size && ep->active) {
         uint32_t result = 0;
 
+        if (ep->need_pre) {
+          pp->need_pre = true;
+        }
+
         if (ep->ep_num == 0 && ep->data_id == USB_PID_SETUP) {
           result = endpoint_setup_transaction(pp, ep);
         }else {
@@ -224,6 +242,11 @@ void pio_usb_host_controller_init(const pio_usb_configuration_t *c)
           }else{
             result = endpoint_out_transaction(pp, ep);
           }
+        }
+
+        if (ep->need_pre) {
+          pp->need_pre = false;
+          restore_fs_bus(pp);
         }
 
         if (result) {
@@ -319,6 +342,7 @@ void pio_usb_host_close_device(uint8_t root_idx, uint8_t device_address)
     pio_hw_endpoint_t *ep = PIO_USB_HW_EP(ep_pool_idx);
     if ( (ep->root_idx == root_idx) && (ep->dev_addr == device_address) && ep->size){
       ep->size = 0;
+      ep->active = 0;
     }
   }
 }

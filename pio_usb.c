@@ -110,20 +110,6 @@
   pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_eop, true);
 }
 
-/*static*/ void __no_inline_not_in_flash_func(restore_fs_bus)(const pio_port_t *pp) {
-  // change bus speed to full-speed
-  pio_sm_set_enabled(pp->pio_usb_tx, pp->sm_tx, false);
-  SM_SET_CLKDIV(pp->pio_usb_tx, pp->sm_tx, pp->clk_div_fs_tx);
-
-  pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_rx, false);
-  SM_SET_CLKDIV(pp->pio_usb_rx, pp->sm_rx, pp->clk_div_fs_rx);
-  pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_rx, true);
-
-  pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_eop, false);
-  SM_SET_CLKDIV(pp->pio_usb_rx, pp->sm_eop, pp->clk_div_fs_rx);
-  pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_eop, true);
-}
-
 /*static*/ void __not_in_flash_func(usb_transfer)(const pio_port_t *pp,
                                               uint8_t *data, uint16_t len) {
   if (pp->need_pre) {
