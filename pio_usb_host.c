@@ -36,19 +36,15 @@ extern uint32_t endpoint_out_transaction(pio_port_t* pp, pio_hw_endpoint_t * ep)
 extern pio_port_t pio_port[1];
 extern root_port_t root_port[PIO_USB_ROOT_PORT_CNT];
 
-extern void __no_inline_not_in_flash_func(wait_handshake)(pio_port_t* pp);
 extern void __no_inline_not_in_flash_func(start_receive)(const pio_port_t *pp);
 extern void __no_inline_not_in_flash_func(prepare_receive)(const pio_port_t *pp);
-extern void __no_inline_not_in_flash_func(data_transfer)(const pio_port_t *pp,
-                                                  uint8_t *tx_data_address,
-                                                  uint8_t tx_data_len);
+extern int __no_inline_not_in_flash_func(receive_packet_and_ack)(pio_port_t* pp);
 extern void __not_in_flash_func(usb_transfer)(const pio_port_t *pp,
                                               uint8_t *data, uint16_t len);
+
 extern void __no_inline_not_in_flash_func(send_out_token)(const pio_port_t *pp,
                                                    uint8_t addr,
                                                    uint8_t ep_num);
-extern int __no_inline_not_in_flash_func(receive_packet_and_ack)(pio_port_t* pp);
-extern void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t addr, uint8_t ep_num);
 
 
 extern void configure_tx_channel(uint8_t ch, PIO pio, uint sm);
@@ -96,6 +92,10 @@ void pio_usb_host_controller_init(const pio_usb_configuration_t *c)
   alarm_pool_add_repeating_timer_us(_alarm_pool, -1000, sof_timer, NULL,
                                       &_sof_rt);
 }
+
+//--------------------------------------------------------------------+
+//
+//--------------------------------------------------------------------+
 
 /*static*/ void __no_inline_not_in_flash_func(override_pio_program)(PIO pio, const pio_program_t* program, uint offset) {
     for (uint i = 0; i < program->length; ++i) {
@@ -179,6 +179,10 @@ void pio_usb_host_controller_init(const pio_usb_configuration_t *c)
   SM_SET_CLKDIV(pp->pio_usb_rx, pp->sm_eop, pp->clk_div_fs_rx);
   pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_eop, true);
 }
+
+//--------------------------------------------------------------------+
+//
+//--------------------------------------------------------------------+
 
 /*static*/ bool __no_inline_not_in_flash_func(connection_check)(pio_hw_root_port_t *port) {
   if (pio_hw_get_line_state(port) == PORT_PIN_SE0) {
@@ -399,6 +403,54 @@ bool pio_usb_endpoint_transfer(uint8_t root_idx, uint8_t device_address, uint8_t
 //
 //--------------------------------------------------------------------+
 
+void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t addr, uint8_t ep_num) {
+  uint16_t dat = ((uint16_t)(ep_num & 0xf) << 7) | (addr & 0x7f);
+  uint8_t crc = calc_usb_crc5(dat);
+  packet[0] = USB_SYNC;
+  packet[1] = USB_PID_IN;
+  packet[2] = dat & 0xff;
+  packet[3] = (crc << 3) | ((dat >> 8) & 0x1f);
+}
+
+/*static*/ void __no_inline_not_in_flash_func(wait_handshake)(pio_port_t* pp) {
+  int16_t t = 240;
+  int16_t idx = 0;
+
+  while (t--) {
+    if (pio_sm_get_rx_fifo_level(pp->pio_usb_rx, pp->sm_rx)) {
+      uint8_t data = pio_sm_get(pp->pio_usb_rx, pp->sm_rx) >> 24;
+      pp->usb_rx_buffer[idx++] = data;
+      if (idx == 2) {
+        break;
+      }
+    }
+  }
+
+  if (t > 0) {
+    while ((pp->pio_usb_rx->irq & IRQ_RX_COMP_MASK) == 0) {
+      continue;
+    }
+  }
+
+  pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_rx, false);
+}
+
+void __no_inline_not_in_flash_func(send_out_token)(const pio_port_t *pp,
+                                                   uint8_t addr,
+                                                   uint8_t ep_num) {
+  uint8_t packet[] = {USB_SYNC, USB_PID_OUT, 0, 0};
+  uint16_t dat = ((uint16_t)(ep_num & 0xf) << 7) | (addr & 0x7f);
+  uint8_t crc = calc_usb_crc5(dat);
+  packet[2] = dat & 0xff;
+  packet[3] = (crc << 3) | ((dat >> 8) & 0x1f);
+
+  usb_transfer(pp, packet, sizeof(packet));
+}
+
+//--------------------------------------------------------------------+
+//
+//--------------------------------------------------------------------+
+
 /*static*/ void __no_inline_not_in_flash_func(endpoint_transfer_finish)(pio_hw_endpoint_t * ep, uint32_t flag) {
   pio_hw_root_port_t *hw_root = PIO_USB_HW_RPORT(ep->root_idx);
   uint32_t const ep_mask = (1u << (ep-pio_hw_ep_pool));
@@ -424,7 +476,10 @@ bool pio_usb_endpoint_transfer(uint8_t root_idx, uint8_t device_address, uint8_t
   uint8_t expect_token = ep->data_id == 0 ? USB_PID_DATA0 : USB_PID_DATA1;
   uint8_t packet[4];
   calc_in_token(packet, ep->dev_addr, ep->ep_num & 0x0f);
-  data_transfer(pp, packet, sizeof(packet));
+
+  prepare_receive(pp);
+  usb_transfer(pp, packet, sizeof(packet));
+  start_receive(pp);
 
   int receive_len = receive_packet_and_ack(pp);
   uint8_t const receive_token = pp->usb_rx_buffer[1];
