@@ -13,9 +13,6 @@
 //--------------------------------------------------------------------+
 
 // IRQ Handler
-__attribute__((weak)) void pio_usb_host_irq_handler(uint8_t root_idx);
+__attribute__((weak)) void pio_usb_device_irq_handler(uint8_t root_idx);
 
-void pio_usb_host_controller_init(const pio_usb_configuration_t *c);
-
-void pio_usb_host_close_device(uint8_t root_idx, uint8_t device_address);
-
+// void pio_usb_device_controller_init(const pio_usb_configuration_t *c);

@@ -6,6 +6,7 @@
 
 #include "pio_usb_hw.h"
 #include "pio_usb_host.h"
+#include "pio_usb_device.h"
 
 // Host functions
 usb_device_t *pio_usb_host_init(const pio_usb_configuration_t *c);

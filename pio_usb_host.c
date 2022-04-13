@@ -24,7 +24,6 @@ static repeating_timer_t _sof_rt;
 
 bool sof_timer(repeating_timer_t *_rt);
 extern void endpoint_transfer_finish(pio_hw_endpoint_t * ep, uint32_t flag);
-extern uint16_t endpoint_out_prepare_buf(pio_hw_endpoint_t * ep, uint8_t* buf);
 extern uint32_t endpoint_setup_transaction( pio_port_t *pp,  pio_hw_endpoint_t *ep);
 extern uint32_t endpoint_in_transaction(pio_port_t* pp, pio_hw_endpoint_t * ep);
 extern uint32_t endpoint_out_transaction(pio_port_t* pp, pio_hw_endpoint_t * ep);
@@ -231,7 +230,7 @@ void pio_usb_host_controller_init(const pio_usb_configuration_t *c)
     for (int ep_pool_idx = 0; ep_pool_idx < PIO_USB_EP_POOL_CNT; ep_pool_idx++) {
       pio_hw_endpoint_t *ep = PIO_USB_HW_EP(ep_pool_idx);
 
-      if (ep->root_idx == root_idx && ep->size && ep->active) {
+      if (ep->root_idx == root_idx && ep->size && ep->has_transfer) {
         uint32_t result = 0;
 
         if (ep->need_pre) {
@@ -288,115 +287,15 @@ void pio_usb_host_controller_init(const pio_usb_configuration_t *c)
   return true;
 }
 
-//--------------------------------------------------------------------+
-//
-//--------------------------------------------------------------------+
-
-pio_hw_endpoint_t* _get_ep(uint8_t root_idx, uint8_t device_address, uint8_t ep_address) {
-  for (int ep_pool_idx = 0; ep_pool_idx < PIO_USB_EP_POOL_CNT; ep_pool_idx++) {
-    pio_hw_endpoint_t *ep = PIO_USB_HW_EP(ep_pool_idx);
-    // note 0x00 and 0x80 are matched as control endpoint of opposite direction
-    if ( (ep->root_idx == root_idx) && (ep->dev_addr == device_address) && ep->size &&
-         ((ep->ep_num == ep_address) || (((ep_address & 0x7f) == 0) && ((ep->ep_num & 0x7f) == 0)) ) ) {
-      return ep;
-    }
-  }
-
-  return NULL;
-}
-
-bool pio_usb_endpoint_open(uint8_t root_idx, uint8_t device_address, uint8_t const* desc_endpoint, bool need_pre) {
-  const endpoint_descriptor_t *d = (const endpoint_descriptor_t *) desc_endpoint;
-
-  pio_hw_endpoint_t *ep = NULL;
-
-  if (device_address == 0) {
-    // dedicate first endpoint for address0
-    ep = PIO_USB_HW_EP(0);
-  }else {
-    for (int ep_pool_idx = 1; ep_pool_idx < PIO_USB_EP_POOL_CNT; ep_pool_idx++) {
-      // ep size is used as valid indicator
-      if (PIO_USB_HW_EP(ep_pool_idx)->size == 0) {
-        ep = PIO_USB_HW_EP(ep_pool_idx);
-        break;
-      }
-    }
-  }
-
-  if (ep == NULL) {
-    return false;
-  }
-
-  // TODO size declared as 8-bit, can cause overflow warning
-  ep->size = d->max_size[0] | (d->max_size[1] << 8);
-  ep->root_idx = root_idx;
-  ep->dev_addr = device_address;
-  ep->need_pre = need_pre;
-  ep->ep_num = d->epaddr;
-  ep->attr = d->attr;
-  ep->interval_counter = 0;
-  ep->data_id = 0;
-
-  return true;
-}
-
 void pio_usb_host_close_device(uint8_t root_idx, uint8_t device_address)
 {
   for (int ep_pool_idx = 0; ep_pool_idx < PIO_USB_EP_POOL_CNT; ep_pool_idx++) {
     pio_hw_endpoint_t *ep = PIO_USB_HW_EP(ep_pool_idx);
     if ( (ep->root_idx == root_idx) && (ep->dev_addr == device_address) && ep->size){
       ep->size = 0;
-      ep->active = 0;
+      ep->has_transfer = 0;
     }
   }
-}
-
-bool pio_usb_endpoint_send_setup(uint8_t root_idx, uint8_t device_address, uint8_t const setup_packet[8]) {
-  pio_hw_endpoint_t *ep = _get_ep(root_idx, device_address, 0);
-  if (!ep) return false;
-
-  ep->ep_num = 0; // setup is is OUT
-  ep->data_id = USB_PID_SETUP;
-
-  ep->bufptr = (uint8_t*) setup_packet;
-  ep->total_len = 8;
-  ep->actual_len = 0;
-
-  uint16_t crc16 = calc_usb_crc16(setup_packet, 8);
-  ep->crc16[0] = crc16 & 0xff;
-  ep->crc16[1] = crc16 >> 8;
-
-  ep->active = true;
-
-  return true;
-}
-
-bool pio_usb_endpoint_transfer(uint8_t root_idx, uint8_t device_address, uint8_t ep_address, uint8_t* buffer, uint16_t buflen) {
-  pio_hw_endpoint_t *ep = _get_ep(root_idx, device_address, ep_address);
-  if (!ep) {
-    printf("no endpoint 0x%02X\r\n", ep_address);
-    return false;
-  }
-
-  // control endpoint switch direction when switch stage
-  if (ep->ep_num != ep_address) {
-    ep->ep_num = ep_address;
-    ep->data_id = 1; // data and status always start with DATA1
-  }
-
-  ep->bufptr = buffer;
-  ep->total_len = buflen;
-  ep->actual_len = 0;
-
-  uint16_t const xact_len = MIN(buflen, ep->size);
-  uint16_t crc16 = calc_usb_crc16(buffer, xact_len);
-
-  ep->crc16[0] = crc16 & 0xff;
-  ep->crc16[1] = crc16 >> 8;
-
-  ep->active = true;
-
-  return true;
 }
 
 //--------------------------------------------------------------------+
@@ -447,6 +346,18 @@ void __no_inline_not_in_flash_func(send_out_token)(const pio_port_t *pp,
   usb_transfer(pp, packet, sizeof(packet));
 }
 
+void __no_inline_not_in_flash_func(send_setup_token)(const pio_port_t *pp,
+                                                      uint8_t addr,
+                                                      uint8_t ep_num) {
+  uint8_t packet[] = {USB_SYNC, USB_PID_SETUP, 0, 0};
+  uint16_t dat = ((uint16_t)(ep_num & 0xf) << 7) | (addr & 0x7f);
+  uint8_t crc = calc_usb_crc5(dat);
+  packet[2] = dat & 0xff;
+  packet[3] = (crc << 3) | ((dat >> 8) & 0x1f);
+
+  usb_transfer(pp, packet, sizeof(packet));
+}
+
 //--------------------------------------------------------------------+
 //
 //--------------------------------------------------------------------+
@@ -467,7 +378,7 @@ void __no_inline_not_in_flash_func(send_out_token)(const pio_port_t *pp,
     // something wrong
   }
 
-  ep->active = false;
+  ep->has_transfer = false;
 }
 
 /*static*/ uint32_t __no_inline_not_in_flash_func(endpoint_in_transaction)(pio_port_t* pp, pio_hw_endpoint_t * ep) {
@@ -486,6 +397,7 @@ void __no_inline_not_in_flash_func(send_out_token)(const pio_port_t *pp,
 
   if (receive_len >= 0) {
     if (receive_token == expect_token) {
+      // skip crc16 check
       memcpy(ep->bufptr+ep->actual_len, &pp->usb_rx_buffer[2], receive_len);
       ep->actual_len += receive_len;
       ep->data_id ^= 1;
@@ -512,27 +424,11 @@ void __no_inline_not_in_flash_func(send_out_token)(const pio_port_t *pp,
   return res;
 }
 
-/*static*/ uint16_t __no_inline_not_in_flash_func(endpoint_out_prepare_buf)(pio_hw_endpoint_t * ep, uint8_t* buf) {
-  buf[0] = USB_SYNC;
-  buf[1] = ep->data_id ? USB_PID_DATA1 : USB_PID_DATA0;
-
-  uint16_t xact_len = ep->total_len-ep->actual_len;
-  xact_len = MIN(xact_len, (uint16_t) ep->size);
-
-  memcpy(buf+2, ep->bufptr+ep->actual_len, xact_len);
-
-  // crc16 is already pre-computed
-  buf[2+xact_len] = ep->crc16[0];
-  buf[2+xact_len+1] = ep->crc16[1];
-
-  return xact_len;
-}
-
 /*static*/ uint32_t __no_inline_not_in_flash_func(endpoint_out_transaction)(pio_port_t* pp, pio_hw_endpoint_t * ep) {
   uint32_t res = 0;
 
   uint8_t out_buf[64+4];
-  uint16_t const xact_len = endpoint_out_prepare_buf(ep, out_buf);
+  uint16_t const xact_len = pio_usb_endpoint_tx_prepare_buf(ep, out_buf, sizeof(out_buf));
 
   prepare_receive(pp);
   send_out_token(pp, ep->dev_addr, ep->ep_num & 0xf);
@@ -571,18 +467,6 @@ void __no_inline_not_in_flash_func(send_out_token)(const pio_port_t *pp,
   return res;
 }
 
-void __no_inline_not_in_flash_func(send_setup_token)(const pio_port_t *pp,
-                                                      uint8_t addr,
-                                                      uint8_t ep_num) {
-  uint8_t packet[] = {USB_SYNC, USB_PID_SETUP, 0, 0};
-  uint16_t dat = ((uint16_t)(ep_num & 0xf) << 7) | (addr & 0x7f);
-  uint8_t crc = calc_usb_crc5(dat);
-  packet[2] = dat & 0xff;
-  packet[3] = (crc << 3) | ((dat >> 8) & 0x1f);
-
-  usb_transfer(pp, packet, sizeof(packet));
-}
-
 uint32_t __no_inline_not_in_flash_func(endpoint_setup_transaction)(
     pio_port_t *pp,  pio_hw_endpoint_t *ep) {
 
@@ -590,7 +474,7 @@ uint32_t __no_inline_not_in_flash_func(endpoint_setup_transaction)(
 
   ep->data_id = 0; // DATA0
   uint8_t setup_buf[8+4];
-  endpoint_out_prepare_buf(ep, setup_buf);
+  pio_usb_endpoint_tx_prepare_buf(ep, setup_buf, sizeof(setup_buf));
 
   // Setup token
   prepare_receive(pp);
