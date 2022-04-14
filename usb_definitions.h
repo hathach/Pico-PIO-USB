@@ -26,6 +26,7 @@ typedef enum {
   STAGE_COMPLETE,
   STAGE_ERROR
 } setup_transfer_stage_t;
+
 typedef enum {
   STAGE_IDLE,
   STAGE_DEVICE,
