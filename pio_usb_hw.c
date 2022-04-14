@@ -78,7 +78,8 @@ bool pio_usb_endpoint_transfer(pio_hw_endpoint_t * ep, uint8_t* buffer, uint16_t
     ep->bufptr = buffer;
   }else
   {
-    ep->bufptr = ep->buffer; // TODO use larger allocation e.g dual packet to improve throughput for BULK
+    // TODO use larger allocation e.g dual packet to improve throughput for BULK
+    ep->bufptr = ep->buffer;
 
     uint16_t const xact_len = MIN(buflen, ep->size);
     ep->buffer[0] = USB_SYNC;

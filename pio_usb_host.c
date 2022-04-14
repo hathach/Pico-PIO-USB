@@ -64,6 +64,8 @@ void pio_usb_host_controller_init(const pio_usb_configuration_t *c)
   _alarm_pool = alarm_pool_create(2, 1);
 
   pio_port_t *pp = PIO_USB_HW_PIO(0);
+  pio_hw_root_port_t* hw_root = PIO_USB_HW_RPORT(0);
+
   pp->pio_usb_tx = c->pio_tx_num == 0 ? pio0 : pio1;
   configure_tx_channel(c->tx_ch, pp->pio_usb_tx, c->sm_tx);
 
@@ -72,10 +74,10 @@ void pio_usb_host_controller_init(const pio_usb_configuration_t *c)
   port_pin_drive_setting(&root_port[0]);
   root_port[0].initialized = true;
 
-  PIO_USB_HW_RPORT(0)->initialized = true;
-  PIO_USB_HW_RPORT(0)->mode = PIO_USB_MODE_HOST;
-  PIO_USB_HW_RPORT(0)->pin_dp = c->pin_dp;
-  PIO_USB_HW_RPORT(0)->pin_dm = c->pin_dp+1;
+  hw_root->initialized = true;
+  hw_root->mode = PIO_USB_MODE_HOST;
+  hw_root->pin_dp = c->pin_dp;
+  hw_root->pin_dm = c->pin_dp+1;
 
   pio_calculate_clkdiv_from_float((float)clock_get_hz(clk_sys) / 48000000,
                                   &pp->clk_div_fs_tx.div_int,
@@ -487,7 +489,7 @@ bool pio_usb_host_endpoint_transfer(uint8_t root_idx, uint8_t device_address, ui
     continue;
   }
 
-  usb_transfer(pp, ep->bufptr, xact_len+4);
+  usb_transfer(pp, ep->bufptr+ep->actual_len, xact_len+4);
   start_receive(pp);
 
   wait_handshake(pp);
