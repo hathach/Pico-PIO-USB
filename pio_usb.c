@@ -646,11 +646,10 @@ void pio_usb_device_set_address(uint8_t root_idx, uint8_t dev_addr) {
   static uint8_t token_buf[64];
   static volatile bool wait_ack = false;
   static uint8_t hand_shake_token[] = {USB_SYNC, USB_PID_NAK};
+  static pio_hw_endpoint_t* active_ep = NULL;
 
   pio_port_t *pp = &pio_port[0];
-
   pio_hw_root_port_t *hw_root = PIO_USB_HW_RPORT(0);
-  static pio_hw_endpoint_t* active_ep = NULL;
 
   //
   // time critical start
@@ -674,7 +673,6 @@ void pio_usb_device_set_address(uint8_t root_idx, uint8_t dev_addr) {
     }
 
     pp->pio_usb_tx->irq |= IRQ_TX_ALL_MASK;  // clear complete flag
-    active_ep = ep;
     while ((pp->pio_usb_tx->irq & IRQ_TX_COMP_MASK) == 0) {
       continue;
     }
@@ -686,7 +684,7 @@ void pio_usb_device_set_address(uint8_t root_idx, uint8_t dev_addr) {
     //
     // time critical end
     //
-
+    active_ep = ep;
     wait_ack = true;
 
   } else if (token_buf[1] == USB_PID_OUT) {
@@ -725,29 +723,12 @@ void pio_usb_device_set_address(uint8_t root_idx, uint8_t dev_addr) {
     restart_usb_reveiver(pp);
     irq_clear(pp->device_rx_irq_num);
 
-#if 0
-    if (res >= 0) {
-      res = process_device_setup_stage(pp->usb_rx_buffer);
-      dev->control_pipe.stage = STAGE_DATA;
-    }
-
-    if (res == 0) {
-      hand_shake_token[1] = USB_PID_NAK;
-    } else {
-      hand_shake_token[1] = USB_PID_STALL;
-    }
-#else
-
     memcpy(hw_root->setup_packet, pp->usb_rx_buffer+2, 8);
     hw_root->ints |= PIO_USB_INTS_SETUP_REQ_BITS;
 
     // DATA1 for both data and status stage
     PIO_USB_HW_EP(0)->data_id = 1;
     PIO_USB_HW_EP(1)->data_id = 1;
-
-    hand_shake_token[1] = USB_PID_NAK;
-#endif
-
   } else if (token_buf[1] == USB_PID_ACK && wait_ack) {
     wait_ack = false;
     if (!active_ep) {
