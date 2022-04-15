@@ -15,18 +15,10 @@
 
 #include "tusb.h"
 
-static inline __force_inline pio_hw_endpoint_t* _get_ep(uint8_t ep_address)
-{
-  // index = 2*num + dir e.g out1, in1, out2, in2
-  uint8_t const ep_idx =  ((ep_address & 0x7f) << 1) | (ep_address >> 7);
-  return PIO_USB_HW_EP(ep_idx);
-}
-
-
 bool pio_usb_device_endpoint_open(uint8_t root_idx, uint8_t const *desc_endpoint)
 {
   const endpoint_descriptor_t *d = (const endpoint_descriptor_t *) desc_endpoint;
-  pio_hw_endpoint_t *ep = _get_ep(d->epaddr);
+  pio_hw_endpoint_t *ep = pio_usb_device_get_ep(d->epaddr);
 
   pio_usb_endpoint_configure(ep, desc_endpoint);
   ep->root_idx = root_idx;
@@ -40,7 +32,7 @@ bool pio_usb_device_endpoint_open(uint8_t root_idx, uint8_t const *desc_endpoint
 bool pio_usb_device_endpoint_transfer(uint8_t root_idx, uint8_t ep_address, uint8_t* buffer, uint16_t buflen)
 {
   (void) root_idx;
-  pio_hw_endpoint_t *ep = _get_ep(ep_address);
+  pio_hw_endpoint_t *ep = pio_usb_device_get_ep(ep_address);
   pio_usb_endpoint_transfer(ep, buffer, buflen);
   return true;
 }

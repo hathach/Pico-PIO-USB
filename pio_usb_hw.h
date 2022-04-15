@@ -61,7 +61,8 @@ typedef struct {
 
   // device only
   uint8_t dev_addr;
-  uint8_t setup_packet[8];
+  //uint8_t setup_packet[8];
+  uint8_t* setup_packet;
 } pio_hw_root_port_t;
 
 typedef struct {
@@ -77,6 +78,7 @@ typedef struct {
   volatile uint8_t interval_counter;
   volatile uint8_t data_id;  // data0 or data1
 
+  volatile bool stalled;
   volatile bool has_transfer;
   uint8_t* bufptr;
   uint16_t total_len;
