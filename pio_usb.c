@@ -462,14 +462,8 @@ void pio_usb_host_restart(void) {
 // Device implementation
 //
 
-
-/*static*/ usb_descriptor_buffers_t descriptor_buffers;
-/*static*/ uint8_t new_devaddr = 0;
-/*static*/ uint8_t ep0_crc5_lut[16];
-
-/*static*/ int8_t ep0_desc_request_type = -1;
-/*static*/ uint16_t ep0_desc_request_len;
-/*static*/ uint8_t ep0_desc_request_idx;
+static uint8_t new_devaddr = 0;
+static uint8_t ep0_crc5_lut[16];
 
 /*static*/ void __no_inline_not_in_flash_func(update_ep0_crc5_lut)(uint8_t addr) {
   uint16_t dat;
@@ -530,112 +524,6 @@ static __always_inline int8_t device_receive_token(uint8_t *buffer,
 
   return -1;
 }
-
-/*static*/ void __no_inline_not_in_flash_func(prepare_ep0_data)(uint8_t *data,
-                                                              uint8_t len) {
-  usb_device_t *dev = &usb_device[0];
-  control_pipe_t *p = &dev->control_pipe;
-
-  p->request_length = len;
-  p->rx_buffer = data;
-  p->buffer_idx = 0;
-
-  ep_pool[0].data_id = 1;
-  ep_pool[0].new_data_flag = false;
-  uint8_t packet_len =
-      p->request_length > PIO_USB_EP_SIZE ? PIO_USB_EP_SIZE : p->request_length;
-  pio_usb_set_out_data(&ep_pool[0], (uint8_t *)&p->rx_buffer[p->buffer_idx],
-                       packet_len);
-}
-
-#if 0
-void pio_usb_device_task(void) {
-  switch (ep0_desc_request_type) {
-    case DESC_TYPE_CONFIG: {
-      uint16_t req_len = ep0_desc_request_len;
-      uint16_t desc_len =
-          descriptor_buffers.config[2] | (descriptor_buffers.config[3] << 8);
-      req_len = req_len > desc_len ? desc_len : req_len;
-      prepare_ep0_data((uint8_t *)descriptor_buffers.config, req_len);
-      ep0_desc_request_type = -1;
-    } break;
-    case DESC_TYPE_STRING: {
-      const uint16_t *str =
-          (uint16_t *)&descriptor_buffers.string[ep0_desc_request_idx];
-      prepare_ep0_data((uint8_t *)str, str[0] & 0xff);
-      ep0_desc_request_type = -1;
-    } break;
-    case DESC_TYPE_HID_REPORT:{
-      prepare_ep0_data(
-          (uint8_t *)descriptor_buffers.hid_report[ep0_desc_request_idx],
-          ep0_desc_request_len);
-      ep0_desc_request_type = -1;
-    }
-    default:
-      break;
-  }
-}
-
-/*static*/ int __no_inline_not_in_flash_func(process_device_setup_stage)(
-    uint8_t *buffer) {
-  int res = -1;
-  const usb_setup_packet_t *packet = (usb_setup_packet_t *)buffer;
-
-  if (packet->request_type == USB_REQ_DIR_IN) {
-    if (packet->request == 0x06) {
-      if (packet->value_msb == DESC_TYPE_DEVICE) {
-        prepare_ep0_data((uint8_t *)descriptor_buffers.device, 18);
-        res = 0;
-      } else if (packet->value_msb == DESC_TYPE_CONFIG) {
-        ep0_desc_request_len = (packet->length_lsb | (packet->length_msb << 8));
-        ep0_desc_request_type = DESC_TYPE_CONFIG;
-        res = 0;
-      } else if (packet->value_msb == DESC_TYPE_STRING) {
-        if (descriptor_buffers.string != NULL) {
-          ep0_desc_request_idx = packet->value_lsb;
-          ep0_desc_request_type = DESC_TYPE_STRING;
-          res = 0;
-        }
-      }
-    }
-  } else if (packet->request_type == USB_REQ_DIR_OUT) {
-    if (packet->request == 0x05) {
-      // set address
-      new_devaddr = packet->value_lsb;
-      prepare_ep0_data(NULL, 0);
-      res = 0;
-    } else if (packet->request == 0x09) {
-      // set configuration
-      prepare_ep0_data(NULL, 0);
-      res = 0;
-    }
-  } else if (packet->request_type == (USB_REQ_DIR_IN | USB_REQ_REC_IFACE)) {
-    if (packet->request == 0x06 && packet->value_msb == DESC_TYPE_HID_REPORT) {
-      // get hid report desc
-      ep0_desc_request_len = (packet->length_lsb | (packet->length_msb << 8));
-      ep0_desc_request_idx = packet->index_lsb;
-      ep0_desc_request_type = DESC_TYPE_HID_REPORT;
-      res = 0;
-    }
-  } else if (packet->request_type == (USB_REQ_TYP_CLASS | USB_REQ_REC_IFACE)) {
-    if (packet->request == 0x09) {
-      // set hid report
-      prepare_ep0_data(NULL, 0);
-      res = 0;
-    } else if (packet->request == 0x0A) {
-      // set hid idle request
-      prepare_ep0_data(NULL, 0);
-      res = 0;
-    } else if (packet->request == 0x0B) {
-      // set hid protocol request
-      prepare_ep0_data(NULL, 0);
-      res = 0;
-    }
-  }
-
-  return res;
-}
-#endif
 
 void pio_usb_device_set_address(uint8_t root_idx, uint8_t dev_addr) {
   (void) root_idx;
@@ -823,7 +711,6 @@ usb_device_t *pio_usb_device_init(const pio_usb_configuration_t *c,
                                   &pp->clk_div_fs_rx.div_frac);
 
   current_config = *c;
-  descriptor_buffers = *buffers;
 
   pio_sm_set_enabled(pp->pio_usb_tx, pp->sm_tx, true);
   prepare_receive(pp);
