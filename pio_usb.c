@@ -126,19 +126,20 @@
   }
 }
 
-/*static*/ void __no_inline_not_in_flash_func(send_ack)(const pio_port_t *pp) {
-  uint8_t data[] = {USB_SYNC, USB_PID_ACK};
-  usb_transfer(pp, data, sizeof(data));
-}
-
-void __no_inline_not_in_flash_func(send_nak)(const pio_port_t *pp) {
-  uint8_t data[] = {USB_SYNC, USB_PID_NAK};
-  usb_transfer(pp, data, sizeof(data));
-}
-
-void __no_inline_not_in_flash_func(send_handshake)(const pio_port_t *pp, uint8_t pid) {
+/*static*/ void __no_inline_not_in_flash_func(send_handshake)(const pio_port_t *pp, uint8_t pid) {
   uint8_t data[] = {USB_SYNC, pid};
   usb_transfer(pp, data, sizeof(data));
+}
+
+void  __no_inline_not_in_flash_func(send_token)(const pio_port_t *pp, uint8_t token, uint8_t addr, uint8_t ep_num) {
+
+  uint8_t packet[4] = { USB_SYNC, token, 0, 0 };
+  uint16_t dat = ((uint16_t)(ep_num & 0xf) << 7) | (addr & 0x7f);
+  uint8_t crc = calc_usb_crc5(dat);
+  packet[2] = dat & 0xff;
+  packet[3] = (crc << 3) | ((dat >> 8) & 0x1f);
+
+  usb_transfer(pp, packet, sizeof(packet));
 }
 
 /*static*/ void __no_inline_not_in_flash_func(prepare_receive)(const pio_port_t *pp) {
@@ -151,6 +152,29 @@ void __no_inline_not_in_flash_func(send_handshake)(const pio_port_t *pp, uint8_t
 /*static*/ void __no_inline_not_in_flash_func(start_receive)(const pio_port_t *pp) {
   pp->pio_usb_rx->ctrl |= (1 << pp->sm_rx);
   pp->pio_usb_rx->irq |= IRQ_RX_ALL_MASK;
+}
+
+/*static*/ void __no_inline_not_in_flash_func(wait_handshake)(pio_port_t* pp) {
+  int16_t t = 240;
+  int16_t idx = 0;
+
+  while (t--) {
+    if (pio_sm_get_rx_fifo_level(pp->pio_usb_rx, pp->sm_rx)) {
+      uint8_t data = pio_sm_get(pp->pio_usb_rx, pp->sm_rx) >> 24;
+      pp->usb_rx_buffer[idx++] = data;
+      if (idx == 2) {
+        break;
+      }
+    }
+  }
+
+  if (t > 0) {
+    while ((pp->pio_usb_rx->irq & IRQ_RX_COMP_MASK) == 0) {
+      continue;
+    }
+  }
+
+  pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_rx, false);
 }
 
 /*static*/ int __no_inline_not_in_flash_func(receive_packet_and_ack)(pio_port_t* pp, bool ack_response) {
@@ -192,12 +216,12 @@ void __no_inline_not_in_flash_func(send_handshake)(const pio_port_t *pp, uint8_t
 
   if (ack_response) {
     if (idx >= 4 && crc_match) {
-      send_ack(pp);
+      send_handshake(pp, USB_PID_ACK);
       // timing critical end
       return idx - 4;
     }
   }else {
-    send_nak(pp);
+    send_handshake(pp, USB_PID_NAK);
   }
 
   return -1;
@@ -371,41 +395,6 @@ endpoint_t *pio_usb_get_endpoint(usb_device_t *device, uint8_t idx) {
     return &ep_pool[ep_id - 1];
   }
   return NULL;
-}
-
-usb_device_t *pio_usb_host_init(const pio_usb_configuration_t *c) {
-  pio_port_t *pp = &pio_port[0];
-  pp->pio_usb_tx = c->pio_tx_num == 0 ? pio0 : pio1;
-  configure_tx_channel(c->tx_ch, pp->pio_usb_tx, c->sm_tx);
-
-  apply_config(pp, c, &root_port[0]);
-  initialize_host_programs(pp, c, &root_port[0]);
-  port_pin_drive_setting(&root_port[0]);
-  root_port[0].initialized = true;
-
-  PIO_USB_HW_RPORT(0)->initialized = true;
-  PIO_USB_HW_RPORT(0)->pin_dp = c->pin_dp;
-  PIO_USB_HW_RPORT(0)->pin_dm = c->pin_dp+1;
-
-  pio_calculate_clkdiv_from_float((float)clock_get_hz(clk_sys) / 48000000,
-                                  &pp->clk_div_fs_tx.div_int,
-                                  &pp->clk_div_fs_tx.div_frac);
-  pio_calculate_clkdiv_from_float((float)clock_get_hz(clk_sys) / 6000000,
-                                  &pp->clk_div_ls_tx.div_int,
-                                  &pp->clk_div_ls_tx.div_frac);
-
-  pio_calculate_clkdiv_from_float((float)clock_get_hz(clk_sys) / 96000000,
-                                  &pp->clk_div_fs_rx.div_int,
-                                  &pp->clk_div_fs_rx.div_frac);
-  pio_calculate_clkdiv_from_float((float)clock_get_hz(clk_sys) / 12000000,
-                                  &pp->clk_div_ls_rx.div_int,
-                                  &pp->clk_div_ls_rx.div_frac);
-
-  start_timer(c->alarm_pool);
-
-  current_config = *c;
-
-  return &usb_device[0];
 }
 
 int pio_usb_host_add_port(uint8_t pin_dp) {
