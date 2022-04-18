@@ -22,9 +22,10 @@
 #define IRQ_RX_ALL_MASK ((1 << IRQ_RX_EOP) | (1 << IRQ_RX_BS_ERR) | (1 << IRQ_RX_START))
 
 static alarm_pool_t* _alarm_pool = NULL;
-static repeating_timer_t _sof_rt;
+static repeating_timer_t sof_rt;
+static bool timer_active;
 
-bool sof_timer(repeating_timer_t *_rt);
+static bool sof_timer(repeating_timer_t *_rt);
 
 static uint32_t endpoint_setup_transaction( pio_port_t *pp,  pio_hw_endpoint_t *ep);
 static uint32_t endpoint_in_transaction(pio_port_t* pp, pio_hw_endpoint_t * ep);
@@ -35,7 +36,6 @@ static uint32_t endpoint_out_transaction(pio_port_t* pp, pio_hw_endpoint_t * ep)
 //--------------------------------------------------------------------+
 
 extern pio_port_t pio_port[1];
-extern root_port_t root_port[PIO_USB_ROOT_PORT_CNT];
 
 extern void __no_inline_not_in_flash_func(start_receive)(const pio_port_t *pp);
 extern void __no_inline_not_in_flash_func(prepare_receive)(const pio_port_t *pp);
@@ -46,9 +46,6 @@ extern void __not_in_flash_func(usb_transfer)(const pio_port_t *pp,
 extern void __no_inline_not_in_flash_func(wait_handshake)(pio_port_t* pp);
 extern void  __no_inline_not_in_flash_func(send_token)(const pio_port_t *pp, uint8_t token, uint8_t addr, uint8_t ep_num);
 
-extern void configure_tx_channel(uint8_t ch, PIO pio, uint sm);
-extern void apply_config(pio_port_t *pp, const pio_usb_configuration_t *c, root_port_t *port);
-extern void initialize_host_programs( pio_port_t *pp, const pio_usb_configuration_t *c, root_port_t *port);
 extern void port_pin_drive_setting(const root_port_t *port);
 
 #define SM_SET_CLKDIV(pio, sm, div) pio_sm_set_clkdiv_int_frac(pio, sm, div.div_int, div.div_frac)
@@ -57,45 +54,74 @@ extern void port_pin_drive_setting(const root_port_t *port);
 //
 //--------------------------------------------------------------------+
 
+static void start_timer(alarm_pool_t *alarm_pool) {
+  if (timer_active) {
+    return;
+  }
+
+  if (alarm_pool != NULL) {
+    alarm_pool_add_repeating_timer_us(alarm_pool, -1000, sof_timer, NULL,
+                                      &sof_rt);
+  } else {
+    add_repeating_timer_us(-1000, sof_timer, NULL, &sof_rt);
+  }
+
+  timer_active = true;
+}
+
+
+static void stop_timer(void) {
+  cancel_repeating_timer(&sof_rt);
+  timer_active = false;
+}
+
 bool pio_usb_host_init(const pio_usb_configuration_t *c)
 {
-  _alarm_pool = alarm_pool_create(2, 1);
-
   pio_port_t *pp = PIO_USB_HW_PIO(0);
   pio_hw_root_port_t* hw_root = PIO_USB_HW_RPORT(0);
 
-  pp->pio_usb_tx = c->pio_tx_num == 0 ? pio0 : pio1;
-  configure_tx_channel(c->tx_ch, pp->pio_usb_tx, c->sm_tx);
-
-  apply_config(pp, c, &root_port[0]);
-  initialize_host_programs(pp, c, &root_port[0]);
-  port_pin_drive_setting(&root_port[0]);
-  root_port[0].initialized = true;
-
-  hw_root->initialized = true;
+  pio_usb_ll_init(pp, c, hw_root);
   hw_root->mode = PIO_USB_MODE_HOST;
-  hw_root->pin_dp = c->pin_dp;
-  hw_root->pin_dm = c->pin_dp+1;
 
-  pio_calculate_clkdiv_from_float((float)clock_get_hz(clk_sys) / 48000000,
+  float const cpu_freq = (float) clock_get_hz(clk_sys);
+  pio_calculate_clkdiv_from_float(cpu_freq / 48000000,
                                   &pp->clk_div_fs_tx.div_int,
                                   &pp->clk_div_fs_tx.div_frac);
-  pio_calculate_clkdiv_from_float((float)clock_get_hz(clk_sys) / 6000000,
+  pio_calculate_clkdiv_from_float(cpu_freq / 6000000,
                                   &pp->clk_div_ls_tx.div_int,
                                   &pp->clk_div_ls_tx.div_frac);
 
-  pio_calculate_clkdiv_from_float((float)clock_get_hz(clk_sys) / 96000000,
+  pio_calculate_clkdiv_from_float(cpu_freq / 96000000,
                                   &pp->clk_div_fs_rx.div_int,
                                   &pp->clk_div_fs_rx.div_frac);
-  pio_calculate_clkdiv_from_float((float)clock_get_hz(clk_sys) / 12000000,
+  pio_calculate_clkdiv_from_float(cpu_freq / 12000000,
                                   &pp->clk_div_ls_rx.div_int,
                                   &pp->clk_div_ls_rx.div_frac);
 
-  alarm_pool_add_repeating_timer_us(_alarm_pool, -1000, sof_timer, NULL,
-                                      &_sof_rt);
+  _alarm_pool = alarm_pool_create(2, 1);
+  start_timer(_alarm_pool);
 
   return true;
 }
+
+static volatile bool cancel_timer_flag;
+static volatile bool start_timer_flag;
+static uint32_t int_stat;
+
+void pio_usb_host_stop(void) {
+  cancel_timer_flag = true;
+  while (cancel_timer_flag) {
+    continue;
+  }
+}
+
+void pio_usb_host_restart(void) {
+  start_timer_flag = true;
+  while (start_timer_flag) {
+    continue;
+  }
+}
+
 
 //--------------------------------------------------------------------+
 //
@@ -205,7 +231,7 @@ bool pio_usb_host_init(const pio_usb_configuration_t *c)
   return true;
 }
 
-/*static*/ bool __no_inline_not_in_flash_func(sof_timer)(repeating_timer_t *_rt) {
+static bool __no_inline_not_in_flash_func(sof_timer)(repeating_timer_t *_rt) {
   static uint8_t sof_packet[4] = {USB_SYNC, USB_PID_SOF, 0x00, 0x10};
   static uint8_t sof_count = 0;
   (void) _rt;
