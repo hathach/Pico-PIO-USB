@@ -102,9 +102,6 @@ port_pin_status_t pio_hw_get_line_state(pio_hw_root_port_t* hw_root);
 void pio_usb_hw_port_reset_start(uint8_t root_idx);
 void pio_usb_hw_port_reset_end(uint8_t root_idx);
 
-
-bool pio_usb_host_endpoint_transfer(uint8_t root_idx, uint8_t device_address, uint8_t ep_address, uint8_t* buffer, uint16_t buflen);
-
 void pio_usb_endpoint_configure(pio_hw_endpoint_t * ep, uint8_t const* desc_endpoint);
 bool pio_usb_endpoint_transfer(pio_hw_endpoint_t * ep, uint8_t* buffer, uint16_t buflen);
 

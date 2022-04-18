@@ -307,15 +307,6 @@ void pio_usb_host_close_device(uint8_t root_idx, uint8_t device_address)
 //
 //--------------------------------------------------------------------+
 
-void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t addr, uint8_t ep_num) {
-  uint16_t dat = ((uint16_t)(ep_num & 0xf) << 7) | (addr & 0x7f);
-  uint8_t crc = calc_usb_crc5(dat);
-  packet[0] = USB_SYNC;
-  packet[1] = USB_PID_IN;
-  packet[2] = dat & 0xff;
-  packet[3] = (crc << 3) | ((dat >> 8) & 0x1f);
-}
-
 /*static*/ void __no_inline_not_in_flash_func(wait_handshake)(pio_port_t* pp) {
   int16_t t = 240;
   int16_t idx = 0;
@@ -339,22 +330,9 @@ void  __no_inline_not_in_flash_func(calc_in_token)(uint8_t * packet, uint8_t add
   pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_rx, false);
 }
 
-void __no_inline_not_in_flash_func(send_out_token)(const pio_port_t *pp,
-                                                   uint8_t addr,
-                                                   uint8_t ep_num) {
-  uint8_t packet[] = {USB_SYNC, USB_PID_OUT, 0, 0};
-  uint16_t dat = ((uint16_t)(ep_num & 0xf) << 7) | (addr & 0x7f);
-  uint8_t crc = calc_usb_crc5(dat);
-  packet[2] = dat & 0xff;
-  packet[3] = (crc << 3) | ((dat >> 8) & 0x1f);
+void  __no_inline_not_in_flash_func(send_token)(const pio_port_t *pp, uint8_t token, uint8_t addr, uint8_t ep_num) {
 
-  usb_transfer(pp, packet, sizeof(packet));
-}
-
-void __no_inline_not_in_flash_func(send_setup_token)(const pio_port_t *pp,
-                                                      uint8_t addr,
-                                                      uint8_t ep_num) {
-  uint8_t packet[] = {USB_SYNC, USB_PID_SETUP, 0, 0};
+  uint8_t packet[4] = { USB_SYNC, token, 0, 0 };
   uint16_t dat = ((uint16_t)(ep_num & 0xf) << 7) | (addr & 0x7f);
   uint8_t crc = calc_usb_crc5(dat);
   packet[2] = dat & 0xff;
@@ -438,11 +416,9 @@ bool pio_usb_host_endpoint_transfer(uint8_t root_idx, uint8_t device_address, ui
   uint32_t res = 0;
 
   uint8_t expect_token = (ep->data_id == 1) ? USB_PID_DATA1 : USB_PID_DATA0;
-  uint8_t packet[4];
-  calc_in_token(packet, ep->dev_addr, ep->ep_num & 0x0f);
 
   prepare_receive(pp);
-  usb_transfer(pp, packet, sizeof(packet));
+  send_token(pp, USB_PID_IN, ep->dev_addr, ep->ep_num);
   start_receive(pp);
 
   int receive_len = receive_packet_and_ack(pp, true);
@@ -483,7 +459,7 @@ bool pio_usb_host_endpoint_transfer(uint8_t root_idx, uint8_t device_address, ui
   uint16_t const xact_len = pio_usb_endpoint_transaction_len(ep);
 
   prepare_receive(pp);
-  send_out_token(pp, ep->dev_addr, ep->ep_num & 0xf);
+  send_token(pp, USB_PID_OUT, ep->dev_addr, ep->ep_num);
   // ensure previous tx complete
   while ((pp->pio_usb_tx->irq & IRQ_TX_COMP_MASK) == 0) {
     continue;
@@ -527,7 +503,7 @@ uint32_t __no_inline_not_in_flash_func(endpoint_setup_transaction)(
   // Setup token
   prepare_receive(pp);
 
-  send_setup_token(pp, ep->dev_addr, 0);
+  send_token(pp, USB_PID_SETUP, ep->dev_addr, 0);
   // ensure previous tx complete
   while ((pp->pio_usb_tx->irq & IRQ_TX_COMP_MASK) == 0) {
     continue;

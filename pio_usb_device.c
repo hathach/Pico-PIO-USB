@@ -28,11 +28,3 @@ bool pio_usb_device_endpoint_open(uint8_t root_idx, uint8_t const *desc_endpoint
 
   return true;
 }
-
-bool pio_usb_device_endpoint_transfer(uint8_t root_idx, uint8_t ep_address, uint8_t* buffer, uint16_t buflen)
-{
-  (void) root_idx;
-  pio_hw_endpoint_t *ep = pio_usb_device_get_ep(ep_address);
-  pio_usb_endpoint_transfer(ep, buffer, buflen);
-  return true;
-}

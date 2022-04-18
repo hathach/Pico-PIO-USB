@@ -136,11 +136,6 @@ void __no_inline_not_in_flash_func(send_nak)(const pio_port_t *pp) {
   usb_transfer(pp, data, sizeof(data));
 }
 
-void __no_inline_not_in_flash_func(send_stall)(const pio_port_t *pp) {
-  uint8_t data[] = {USB_SYNC, USB_PID_NAK};
-  usb_transfer(pp, data, sizeof(data));
-}
-
 void __no_inline_not_in_flash_func(send_handshake)(const pio_port_t *pp, uint8_t pid) {
   uint8_t data[] = {USB_SYNC, pid};
   usb_transfer(pp, data, sizeof(data));
