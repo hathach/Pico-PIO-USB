@@ -152,7 +152,7 @@ void  __no_inline_not_in_flash_func(send_token)(const pio_port_t *pp, uint8_t to
   pp->pio_usb_rx->irq |= IRQ_RX_ALL_MASK;
 }
 
-/*static*/ void __no_inline_not_in_flash_func(wait_handshake)(pio_port_t* pp) {
+/*static*/ uint8_t __no_inline_not_in_flash_func(wait_handshake)(pio_port_t* pp) {
   int16_t t = 240;
   int16_t idx = 0;
 
@@ -173,6 +173,8 @@ void  __no_inline_not_in_flash_func(send_token)(const pio_port_t *pp, uint8_t to
   }
 
   pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_rx, false);
+
+  return pp->usb_rx_buffer[1];
 }
 
 /*static*/ int __no_inline_not_in_flash_func(receive_packet_and_ack)(pio_port_t* pp, bool ack_response) {
@@ -196,19 +198,26 @@ void  __no_inline_not_in_flash_func(send_token)(const pio_port_t *pp, uint8_t to
 
   // timing critical start
   if (t > 0) {
-    while ((pp->pio_usb_rx->irq & IRQ_RX_COMP_MASK) == 0) {
-      if (pio_sm_get_rx_fifo_level(pp->pio_usb_rx, pp->sm_rx)) {
-        uint8_t data = pio_sm_get(pp->pio_usb_rx, pp->sm_rx) >> 24;
-        if (ack_response)
-        {
-          crc_prev2 = crc_prev;
-          crc_prev = crc;
-          crc = update_usb_crc16(crc, data);
-          pp->usb_rx_buffer[idx++] = data;
-          crc_receive = (crc_receive >> 8) | (data << 8);
-          crc_match = ((crc_receive ^ 0xffff) == crc_prev2);
+    if (ack_response)
+    {
+      while ((pp->pio_usb_rx->irq & IRQ_RX_COMP_MASK) == 0) {
+        if (pio_sm_get_rx_fifo_level(pp->pio_usb_rx, pp->sm_rx)) {
+          uint8_t data = pio_sm_get(pp->pio_usb_rx, pp->sm_rx) >> 24;
+          {
+            crc_prev2 = crc_prev;
+            crc_prev = crc;
+            crc = update_usb_crc16(crc, data);
+            pp->usb_rx_buffer[idx++] = data;
+            crc_receive = (crc_receive >> 8) | (data << 8);
+            crc_match = ((crc_receive ^ 0xffff) == crc_prev2);
+          }
         }
       }
+    }else {
+      while ((pp->pio_usb_rx->irq & IRQ_RX_COMP_MASK) == 0) {
+        continue;
+      }
+      pio_sm_clear_fifos(pp->pio_usb_rx, pp->sm_rx);
     }
   }
 
@@ -312,7 +321,7 @@ void pio_usb_ll_init(pio_port_t *pp, const pio_usb_configuration_t *c, pio_hw_ro
   hw_root->dev_addr = 0;
 }
 
-
+#if 0
 endpoint_t *pio_usb_get_endpoint(usb_device_t *device, uint8_t idx) {
   uint8_t ep_id = device->endpoint_id[idx];
   if (ep_id == 0) {
@@ -357,6 +366,7 @@ int __no_inline_not_in_flash_func(pio_usb_set_out_data)(endpoint_t *ep,
 
   return 0;
 }
+#endif
 
 
 int pio_usb_host_add_port(uint8_t pin_dp) {
@@ -384,9 +394,5 @@ int pio_usb_host_add_port(uint8_t pin_dp) {
 
   return -1;
 }
-
-//
-// Device implementation
-//
 
 #pragma GCC pop_options

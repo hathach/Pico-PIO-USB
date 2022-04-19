@@ -43,7 +43,7 @@ extern int __no_inline_not_in_flash_func(receive_packet_and_ack)(pio_port_t* pp,
 extern void __not_in_flash_func(usb_transfer)(const pio_port_t *pp,
                                               uint8_t *data, uint16_t len);
 
-extern void __no_inline_not_in_flash_func(wait_handshake)(pio_port_t* pp);
+extern uint8_t __no_inline_not_in_flash_func(wait_handshake)(pio_port_t* pp);
 extern void  __no_inline_not_in_flash_func(send_token)(const pio_port_t *pp, uint8_t token, uint8_t addr, uint8_t ep_num);
 
 extern void port_pin_drive_setting(const root_port_t *port);
