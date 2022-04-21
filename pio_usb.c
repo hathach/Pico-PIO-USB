@@ -66,7 +66,10 @@
 /*static*/ usb_device_t usb_device[PIO_USB_DEVICE_CNT];
 /*static*/ pio_port_t pio_port[1];
 /*static*/ root_port_t root_port[PIO_USB_ROOT_PORT_CNT];
-/*static*/ endpoint_t ep_pool[PIO_USB_EP_POOL_CNT];
+
+endpoint_t pio_usb_ep_pool[PIO_USB_EP_POOL_CNT];
+
+pio_hw_root_port_t pio_usb_root_port[PIO_USB_ROOT_PORT_CNT];
 
 #define SM_SET_CLKDIV(pio, sm, div) pio_sm_set_clkdiv_int_frac(pio, sm, div.div_int, div.div_frac)
 
@@ -319,6 +322,46 @@ void pio_usb_ll_init(pio_port_t *pp, const pio_usb_configuration_t *c, pio_hw_ro
   port_pin_drive_setting(hw_root);
   hw_root->initialized = true;
   hw_root->dev_addr = 0;
+}
+
+void pio_usb_ll_endpoint_configure(endpoint_t * ep, uint8_t const* desc_endpoint)
+{
+  const endpoint_descriptor_t *d = (const endpoint_descriptor_t *) desc_endpoint;
+
+  ep->size             = d->max_size[0] | (d->max_size[1] << 8);
+  ep->ep_num           = d->epaddr;
+  ep->attr             = d->attr;
+  ep->interval_counter = 0;
+  ep->data_id          = 0;
+}
+
+bool pio_usb_ll_endpoint_transfer(endpoint_t * ep, uint8_t* buffer, uint16_t buflen)
+{
+  ep->total_len = buflen;
+  ep->actual_len = 0;
+
+  if (!ep->is_tx) {
+    ep->bufptr = buffer;
+  }else
+  {
+    // TODO use larger allocation e.g dual packet to improve throughput for BULK
+    ep->bufptr = ep->buffer;
+
+    uint16_t const xact_len = MIN(buflen, ep->size);
+    ep->buffer[0] = USB_SYNC;
+    ep->buffer[1] = (ep->data_id == 1) ? USB_PID_DATA1 : USB_PID_DATA0;
+    memcpy(ep->buffer+2, buffer, xact_len);
+
+    uint16_t const crc16 = calc_usb_crc16(buffer, xact_len);
+    ep->buffer[2+xact_len] = crc16 & 0xff;
+    ep->buffer[2+xact_len+1] = crc16 >> 8;
+
+    ep->packet_len = xact_len + 4;
+  }
+
+  ep->has_transfer = true;
+
+  return true;
 }
 
 #if 0

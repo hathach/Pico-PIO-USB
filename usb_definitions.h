@@ -53,15 +53,26 @@ typedef struct {
 } control_pipe_t;
 
 typedef struct {
+  volatile uint8_t root_idx;
+  volatile uint8_t dev_addr;
+           bool    need_pre;
+           bool    is_tx;
+
   volatile uint8_t ep_num;
-  volatile uint8_t size;
-  volatile uint8_t buffer[64 + 4];
-  volatile uint8_t packet_len;
-  volatile bool new_data_flag;
+  volatile uint16_t size;
   volatile uint8_t attr;
   volatile uint8_t interval;
   volatile uint8_t interval_counter;
   volatile uint8_t data_id;  // data0 or data1
+
+  volatile bool stalled;
+  volatile bool has_transfer;
+  uint8_t* bufptr;
+  uint16_t total_len;
+  uint16_t actual_len;
+
+  uint8_t buffer[64 + 4];
+  uint8_t packet_len;
 } endpoint_t;
 
 typedef enum {
@@ -70,6 +81,29 @@ typedef enum {
   EVENT_DISCONNECT,
   EVENT_HUB_PORT_CHANGE,
 } usb_device_event_t;
+
+typedef struct {
+  volatile bool initialized;
+  volatile bool is_fullspeed;
+  volatile bool connected;
+  volatile bool suspended;
+
+  uint8_t mode;
+
+  volatile uint pin_dp;
+  volatile uint pin_dm;
+
+  // register interface
+  volatile uint32_t ints; // interrupt status
+  volatile uint32_t ep_complete;
+  volatile uint32_t ep_error;
+  volatile uint32_t ep_stalled;
+
+  // device only
+  uint8_t dev_addr;
+  //uint8_t setup_packet[8];
+  uint8_t* setup_packet;
+} pio_hw_root_port_t;
 
 typedef struct struct_usb_device_t usb_device_t;
 typedef struct struct_root_port_t {
@@ -385,7 +419,7 @@ typedef struct {
 
 typedef enum{
   PORT_PIN_SE0 = 0b00,
-  PORT_PIN_LS_IDLE = 0b01,
-  PORT_PIN_FS_IDLE = 0b10,
+  PORT_PIN_FS_IDLE = 0b01,
+  PORT_PIN_LS_IDLE = 0b10,
   PORT_PIN_SE1 = 0b11,
 } port_pin_status_t;
