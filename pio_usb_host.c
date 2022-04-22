@@ -3,52 +3,35 @@
  *                    Ha Thach (thach@tinyusb.org)
  */
 
+#pragma GCC push_options
+#pragma GCC optimize("-O3")
+
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 
 #include "pio_usb.h"
+#include "pio_usb_ll.h"
 #include "usb_crc.h"
 #include "usb_tx.pio.h"
 #include "usb_rx.pio.h"
 
 #include "tusb.h"
 
-#define IRQ_TX_EOP_MASK (1 << usb_tx_fs_IRQ_EOP)
-#define IRQ_TX_COMP_MASK (1 << usb_tx_fs_IRQ_COMP)
-#define IRQ_TX_ALL_MASK (IRQ_TX_EOP_MASK | IRQ_TX_COMP_MASK)
-#define IRQ_RX_COMP_MASK (1 << IRQ_RX_EOP)
-#define IRQ_RX_ALL_MASK ((1 << IRQ_RX_EOP) | (1 << IRQ_RX_BS_ERR) | (1 << IRQ_RX_START))
-
 static alarm_pool_t* _alarm_pool = NULL;
 static repeating_timer_t sof_rt;
 static bool timer_active;
+
+static volatile bool cancel_timer_flag;
+static volatile bool start_timer_flag;
+static uint32_t int_stat;
 
 static bool sof_timer(repeating_timer_t *_rt);
 
 static uint32_t endpoint_setup_transaction( pio_port_t *pp,  endpoint_t *ep);
 static uint32_t endpoint_in_transaction(pio_port_t* pp, endpoint_t * ep);
 static uint32_t endpoint_out_transaction(pio_port_t* pp, endpoint_t * ep);
-
-//--------------------------------------------------------------------+
-//
-//--------------------------------------------------------------------+
-
-extern pio_port_t pio_port[1];
-
-extern void __no_inline_not_in_flash_func(start_receive)(const pio_port_t *pp);
-extern void __no_inline_not_in_flash_func(prepare_receive)(const pio_port_t *pp);
-extern int __no_inline_not_in_flash_func(receive_packet_and_ack)(pio_port_t* pp, bool ack_handshake);
-extern void __not_in_flash_func(usb_transfer)(const pio_port_t *pp,
-                                              uint8_t *data, uint16_t len);
-
-extern uint8_t __no_inline_not_in_flash_func(wait_handshake)(pio_port_t* pp);
-extern void  __no_inline_not_in_flash_func(send_token)(const pio_port_t *pp, uint8_t token, uint8_t addr, uint8_t ep_num);
-
-extern void port_pin_drive_setting(const root_port_t *port);
-
-#define SM_SET_CLKDIV(pio, sm, div) pio_sm_set_clkdiv_int_frac(pio, sm, div.div_int, div.div_frac)
 
 //--------------------------------------------------------------------+
 //
@@ -80,7 +63,7 @@ bool pio_usb_host_init(const pio_usb_configuration_t *c)
   pio_port_t *pp = PIO_USB_PIO_PORT(0);
   root_port_t* rport = PIO_USB_ROOT_PORT(0);
 
-  pio_usb_ll_init(pp, c, rport);
+  pio_usb_bus_init(pp, c, rport);
   rport->mode = PIO_USB_MODE_HOST;
 
   float const cpu_freq = (float) clock_get_hz(clk_sys);
@@ -104,10 +87,6 @@ bool pio_usb_host_init(const pio_usb_configuration_t *c)
   return true;
 }
 
-static volatile bool cancel_timer_flag;
-static volatile bool start_timer_flag;
-static uint32_t int_stat;
-
 void pio_usb_host_stop(void) {
   cancel_timer_flag = true;
   while (cancel_timer_flag) {
@@ -121,7 +100,6 @@ void pio_usb_host_restart(void) {
     continue;
   }
 }
-
 
 //--------------------------------------------------------------------+
 //
@@ -210,15 +188,11 @@ void pio_usb_host_restart(void) {
   pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_eop, true);
 }
 
-//--------------------------------------------------------------------+
-//
-//--------------------------------------------------------------------+
-
 /*static*/ bool __no_inline_not_in_flash_func(connection_check)(root_port_t *port) {
-  if (pio_usb_ll_get_line_state(port) == PORT_PIN_SE0) {
+  if (pio_usb_bus_get_line_state(port) == PORT_PIN_SE0) {
     busy_wait_us_32(1);
 
-    if (pio_usb_ll_get_line_state(port) == PORT_PIN_SE0) {
+    if (pio_usb_bus_get_line_state(port) == PORT_PIN_SE0) {
       busy_wait_us_32(1);
       // device disconnect
       port->connected = false;
@@ -231,12 +205,16 @@ void pio_usb_host_restart(void) {
   return true;
 }
 
+//--------------------------------------------------------------------+
+//
+//--------------------------------------------------------------------+
+
 static bool __no_inline_not_in_flash_func(sof_timer)(repeating_timer_t *_rt) {
   static uint8_t sof_packet[4] = {USB_SYNC, USB_PID_SOF, 0x00, 0x10};
   static uint8_t sof_count = 0;
   (void) _rt;
 
-  pio_port_t *pp = &pio_port[0];
+  pio_port_t *pp = PIO_USB_PIO_PORT(0);
 
   // Send SOF
   for (int root_idx = 0; root_idx < PIO_USB_ROOT_PORT_CNT; root_idx++) {
@@ -246,7 +224,7 @@ static bool __no_inline_not_in_flash_func(sof_timer)(repeating_timer_t *_rt) {
       continue;
     }
     configure_root_port(pp, rport);
-    usb_transfer(pp, sof_packet, 4);
+    pio_usb_bus_usb_transfer(pp, sof_packet, 4);
   }
 
   // Carry out all queued endpoint transaction
@@ -294,7 +272,7 @@ static bool __no_inline_not_in_flash_func(sof_timer)(repeating_timer_t *_rt) {
   for (int root_idx = 0; root_idx < PIO_USB_ROOT_PORT_CNT; root_idx++) {
     root_port_t *rport = PIO_USB_ROOT_PORT(root_idx);
     if ( rport->initialized && !rport->connected) {
-      port_pin_status_t const line_state = pio_usb_ll_get_line_state(rport);
+      port_pin_status_t const line_state = pio_usb_bus_get_line_state(rport);
       if ( line_state == PORT_PIN_FS_IDLE || line_state == PORT_PIN_LS_IDLE) {
         rport->is_fullspeed = (line_state == PORT_PIN_FS_IDLE);
         rport->connected = true;
@@ -434,17 +412,17 @@ bool pio_usb_host_endpoint_transfer(uint8_t root_idx, uint8_t device_address, ui
 static uint32_t __no_inline_not_in_flash_func(endpoint_in_transaction)(pio_port_t* pp, endpoint_t * ep) {
   uint32_t res = 0;
 
-  uint8_t expect_token = (ep->data_id == 1) ? USB_PID_DATA1 : USB_PID_DATA0;
+  uint8_t expect_pid = (ep->data_id == 1) ? USB_PID_DATA1 : USB_PID_DATA0;
 
-  prepare_receive(pp);
-  send_token(pp, USB_PID_IN, ep->dev_addr, ep->ep_num);
-  start_receive(pp);
+  pio_usb_bus_prepare_receive(pp);
+  pio_usb_bus_send_token(pp, USB_PID_IN, ep->dev_addr, ep->ep_num);
+  pio_usb_bus_start_receive(pp);
 
-  int receive_len = receive_packet_and_ack(pp, true);
-  uint8_t const receive_token = pp->usb_rx_buffer[1];
+  int receive_len = pio_usb_bus_receive_packet_and_handshake(pp, USB_PID_ACK);
+  uint8_t const receive_pid = pp->usb_rx_buffer[1];
 
   if (receive_len >= 0) {
-    if (receive_token == expect_token) {
+    if (receive_pid == expect_pid) {
       // skip crc16 check
       memcpy(ep->bufptr+ep->actual_len, &pp->usb_rx_buffer[2], receive_len);
       ep->actual_len += receive_len;
@@ -457,9 +435,9 @@ static uint32_t __no_inline_not_in_flash_func(endpoint_in_transaction)(pio_port_
     }else {
       // DATA0/1 mismatched, 0 for re-try next frame
     }
-  } else if (receive_token == USB_PID_NAK) {
+  } else if (receive_pid == USB_PID_NAK) {
     // NAK try again next frame
-  } else if (receive_token == USB_PID_STALL) {
+  } else if (receive_pid == USB_PID_STALL) {
     res = PIO_USB_INTS_ENDPOINT_STALLED_BITS;
   }else {
     res = PIO_USB_INTS_ENDPOINT_ERROR_BITS;
@@ -477,17 +455,17 @@ static uint32_t __no_inline_not_in_flash_func(endpoint_out_transaction)(pio_port
 
   uint16_t const xact_len = pio_usb_ll_endpoint_transaction_len(ep);
 
-  prepare_receive(pp);
-  send_token(pp, USB_PID_OUT, ep->dev_addr, ep->ep_num);
+  pio_usb_bus_prepare_receive(pp);
+  pio_usb_bus_send_token(pp, USB_PID_OUT, ep->dev_addr, ep->ep_num);
   // ensure previous tx complete
   while ((pp->pio_usb_tx->irq & IRQ_TX_COMP_MASK) == 0) {
     continue;
   }
 
-  usb_transfer(pp, ep->bufptr+ep->actual_len, xact_len+4);
-  start_receive(pp);
+  pio_usb_bus_usb_transfer(pp, ep->bufptr+ep->actual_len, xact_len+4);
+  pio_usb_bus_start_receive(pp);
 
-  wait_handshake(pp);
+  pio_usb_bus_wait_handshake(pp);
 
   uint8_t const receive_token = pp->usb_rx_buffer[1];
 
@@ -520,9 +498,9 @@ static uint32_t __no_inline_not_in_flash_func(endpoint_setup_transaction)(
   uint32_t res = 0;
 
   // Setup token
-  prepare_receive(pp);
+  pio_usb_bus_prepare_receive(pp);
 
-  send_token(pp, USB_PID_SETUP, ep->dev_addr, 0);
+  pio_usb_bus_send_token(pp, USB_PID_SETUP, ep->dev_addr, 0);
   // ensure previous tx complete
   while ((pp->pio_usb_tx->irq & IRQ_TX_COMP_MASK) == 0) {
     continue;
@@ -530,11 +508,11 @@ static uint32_t __no_inline_not_in_flash_func(endpoint_setup_transaction)(
 
   // Data
   ep->data_id = 0; // set to DATA0
-  usb_transfer(pp, ep->bufptr, 12);
+  pio_usb_bus_usb_transfer(pp, ep->bufptr, 12);
 
   // Handshake
-  start_receive(pp);
-  wait_handshake(pp);
+  pio_usb_bus_start_receive(pp);
+  pio_usb_bus_wait_handshake(pp);
 
   ep->actual_len = 8;
 
@@ -548,3 +526,6 @@ static uint32_t __no_inline_not_in_flash_func(endpoint_setup_transaction)(
 
   return res;
 }
+
+#pragma GCC pop_options
+

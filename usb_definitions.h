@@ -134,7 +134,6 @@ struct struct_usb_device_t {
   root_port_t *root;
 };
 
-// bit order MSB --> LSB (spec is LSB -> MSB)
 enum {
   USB_SYNC = 0x80,
   USB_PID_OUT = 0xe1,

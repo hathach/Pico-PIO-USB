@@ -93,19 +93,40 @@ extern pio_port_t pio_port[1];
 
 
 //--------------------------------------------------------------------+
-//
+// Bus functions
 //--------------------------------------------------------------------+
 
-void pio_usb_ll_init(pio_port_t *pp, const pio_usb_configuration_t *c, root_port_t* hw_root);
+#define IRQ_TX_EOP_MASK (1 << usb_tx_fs_IRQ_EOP)
+#define IRQ_TX_COMP_MASK (1 << usb_tx_fs_IRQ_COMP)
+#define IRQ_TX_ALL_MASK (IRQ_TX_EOP_MASK | IRQ_TX_COMP_MASK)
+#define IRQ_RX_COMP_MASK (1 << IRQ_RX_EOP)
+#define IRQ_RX_ALL_MASK ((1 << IRQ_RX_EOP) | (1 << IRQ_RX_BS_ERR) | (1 << IRQ_RX_START))
 
-static __always_inline port_pin_status_t pio_usb_ll_get_line_state(root_port_t* hw_root)
+#define SM_SET_CLKDIV(pio, sm, div) pio_sm_set_clkdiv_int_frac(pio, sm, div.div_int, div.div_frac)
+
+void pio_usb_bus_init(pio_port_t *pp, const pio_usb_configuration_t *c, root_port_t* root);
+
+void pio_usb_bus_start_receive(const pio_port_t *pp);
+void pio_usb_bus_prepare_receive(const pio_port_t *pp);
+int pio_usb_bus_receive_packet_and_handshake(pio_port_t* pp, uint8_t handshake);
+void pio_usb_bus_usb_transfer(const pio_port_t *pp, uint8_t *data, uint16_t len);
+
+uint8_t pio_usb_bus_wait_handshake(pio_port_t* pp);
+void pio_usb_bus_send_handshake(const pio_port_t *pp, uint8_t pid);
+void  pio_usb_bus_send_token(const pio_port_t *pp, uint8_t token, uint8_t addr, uint8_t ep_num);
+
+
+static __always_inline port_pin_status_t pio_usb_bus_get_line_state(root_port_t* root)
 {
-  uint8_t dp = gpio_get(hw_root->pin_dp) ? 1 : 0;
-  uint8_t dm = gpio_get(hw_root->pin_dm) ? 1 : 0;
+  uint8_t dp = gpio_get(root->pin_dp) ? 1 : 0;
+  uint8_t dm = gpio_get(root->pin_dm) ? 1 : 0;
 
   return (dm << 1) | dp;
 }
 
+//--------------------------------------------------------------------+
+// Low Level functions
+//--------------------------------------------------------------------+
 
 void pio_usb_ll_endpoint_configure(endpoint_t * ep, uint8_t const* desc_endpoint);
 bool pio_usb_ll_endpoint_transfer(endpoint_t * ep, uint8_t* buffer, uint16_t buflen);
@@ -134,4 +155,40 @@ static inline __force_inline uint16_t pio_usb_ll_endpoint_transaction_len(endpoi
   uint16_t remaining = ep->total_len - ep->actual_len;
   return (remaining < ep->size) ? remaining : ep->size;
 }
+
+//--------------------------------------------------------------------
+// Host functions
+//--------------------------------------------------------------------
+
+// Host IRQ Handler
+__attribute__((weak)) void pio_usb_host_irq_handler(uint8_t root_idx);
+
+void pio_usb_host_port_reset_start(uint8_t root_idx);
+void pio_usb_host_port_reset_end(uint8_t root_idx);
+
+void pio_usb_host_close_device(uint8_t root_idx, uint8_t device_address);
+
+bool pio_usb_host_endpoint_open(uint8_t root_idx, uint8_t device_address, uint8_t const *desc_endpoint, bool need_pre);
+bool pio_usb_host_send_setup(uint8_t root_idx, uint8_t device_address, uint8_t const setup_packet[8]);
+bool pio_usb_host_endpoint_transfer(uint8_t root_idx, uint8_t device_address, uint8_t ep_address, uint8_t* buffer, uint16_t buflen);
+
+//--------------------------------------------------------------------
+// Device functions
+//--------------------------------------------------------------------
+
+// Device IRQ Handler
+__attribute__((weak)) void pio_usb_device_irq_handler(uint8_t root_idx);
+
+void pio_usb_device_set_address(uint8_t root_idx, uint8_t dev_addr);
+bool pio_usb_device_endpoint_open(uint8_t root_idx, uint8_t const *desc_endpoint);
+bool pio_usb_device_endpoint_transfer(uint8_t root_idx, uint8_t ep_address, uint8_t* buffer, uint16_t buflen);
+
+static inline __force_inline endpoint_t* pio_usb_device_get_endpoint_by_address(uint8_t ep_address)
+{
+  // index = 2*num + dir e.g out1, in1, out2, in2
+  uint8_t const ep_idx =  ((ep_address & 0x7f) << 1) | (ep_address >> 7);
+  return PIO_USB_ENDPOINT(ep_idx);
+}
+
+
 
