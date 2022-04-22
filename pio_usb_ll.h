@@ -7,6 +7,7 @@
 
 #include "usb_definitions.h"
 #include "pio_usb_configuration.h"
+#include "hardware/pio.h"
 
 enum {
   PIO_USB_INTS_CONNECT_POS = 0,
@@ -31,6 +32,45 @@ enum {
 #define PIO_USB_INTS_ENDPOINT_ERROR_BITS       (1u << PIO_USB_INTS_ENDPOINT_ERROR_POS)
 #define PIO_USB_INTS_ENDPOINT_STALLED_BITS     (1u << PIO_USB_INTS_ENDPOINT_STALLED_POS)
 
+typedef enum{
+  PORT_PIN_SE0 = 0b00,
+  PORT_PIN_FS_IDLE = 0b01,
+  PORT_PIN_LS_IDLE = 0b10,
+  PORT_PIN_SE1 = 0b11,
+} port_pin_status_t;
+
+typedef struct {
+  uint16_t div_int;
+  uint8_t div_frac;
+} pio_clk_div_t;
+
+typedef struct {
+  PIO pio_usb_tx;  // could not set to volatile
+  uint sm_tx;
+  uint offset_tx;
+  uint tx_ch;
+
+  PIO pio_usb_rx;  // could not set to volatile
+  uint sm_rx;
+  uint offset_rx;
+  uint sm_eop;
+  uint offset_eop;
+  uint rx_reset_instr;
+  uint device_rx_irq_num;
+
+  int8_t debug_pin_rx;
+  int8_t debug_pin_eop;
+
+  pio_clk_div_t clk_div_fs_tx;
+  pio_clk_div_t clk_div_fs_rx;
+  pio_clk_div_t clk_div_ls_tx;
+  pio_clk_div_t clk_div_ls_rx;
+
+  bool need_pre;
+
+  uint8_t usb_rx_buffer[128];
+} pio_port_t;
+
 
 //--------------------------------------------------------------------+
 //
@@ -42,18 +82,23 @@ enum {
   PIO_USB_MODE_HOST,
 };
 
-extern pio_hw_root_port_t pio_usb_root_port[PIO_USB_ROOT_PORT_CNT];
-#define PIO_USB_HW_RPORT(_idx)    (pio_usb_root_port + (_idx))
+extern root_port_t pio_usb_root_port[PIO_USB_ROOT_PORT_CNT];
+#define PIO_USB_ROOT_PORT(_idx)    (pio_usb_root_port + (_idx))
 
 extern endpoint_t pio_usb_ep_pool[PIO_USB_EP_POOL_CNT];
-#define PIO_USB_HW_EP(_idx)     (pio_usb_ep_pool + (_idx))
+#define PIO_USB_ENDPOINT(_idx)     (pio_usb_ep_pool + (_idx))
 
 extern pio_port_t pio_port[1];
-#define PIO_USB_HW_PIO(_idx)    (pio_port + (_idx))
+#define PIO_USB_PIO_PORT(_idx)    (pio_port + (_idx))
 
-void pio_usb_ll_init(pio_port_t *pp, const pio_usb_configuration_t *c, pio_hw_root_port_t* hw_root);
 
-static __always_inline port_pin_status_t pio_usb_ll_get_line_state(pio_hw_root_port_t* hw_root)
+//--------------------------------------------------------------------+
+//
+//--------------------------------------------------------------------+
+
+void pio_usb_ll_init(pio_port_t *pp, const pio_usb_configuration_t *c, root_port_t* hw_root);
+
+static __always_inline port_pin_status_t pio_usb_ll_get_line_state(root_port_t* hw_root)
 {
   uint8_t dp = gpio_get(hw_root->pin_dp) ? 1 : 0;
   uint8_t dm = gpio_get(hw_root->pin_dm) ? 1 : 0;
@@ -65,18 +110,18 @@ static __always_inline port_pin_status_t pio_usb_ll_get_line_state(pio_hw_root_p
 void pio_usb_ll_endpoint_configure(endpoint_t * ep, uint8_t const* desc_endpoint);
 bool pio_usb_ll_endpoint_transfer(endpoint_t * ep, uint8_t* buffer, uint16_t buflen);
 
-static inline __force_inline void pio_usb_endpoint_finish_transfer(endpoint_t * ep, uint32_t flag) {
-  pio_hw_root_port_t *hw_root = PIO_USB_HW_RPORT(ep->root_idx);
+static inline __force_inline void pio_usb_ll_endpoint_complete(endpoint_t * ep, uint32_t flag) {
+  root_port_t *rport = PIO_USB_ROOT_PORT(ep->root_idx);
   uint32_t const ep_mask = (1u << (ep-pio_usb_ep_pool));
 
-  hw_root->ints |= flag;
+  rport->ints |= flag;
 
   if (flag == PIO_USB_INTS_ENDPOINT_COMPLETE_BITS) {
-    hw_root->ep_complete |= ep_mask;
+    rport->ep_complete |= ep_mask;
   }else if (flag == PIO_USB_INTS_ENDPOINT_ERROR_BITS) {
-    hw_root->ep_error |= ep_mask;
+    rport->ep_error |= ep_mask;
   }else if (flag == PIO_USB_INTS_ENDPOINT_STALLED_BITS) {
-    hw_root->ep_stalled |= ep_mask;
+    rport->ep_stalled |= ep_mask;
   }else {
     // something wrong
   }
@@ -84,7 +129,7 @@ static inline __force_inline void pio_usb_endpoint_finish_transfer(endpoint_t * 
   ep->has_transfer = false;
 }
 
-static inline __force_inline uint16_t pio_usb_endpoint_transaction_len(endpoint_t * ep)
+static inline __force_inline uint16_t pio_usb_ll_endpoint_transaction_len(endpoint_t * ep)
 {
   uint16_t remaining = ep->total_len - ep->actual_len;
   return (remaining < ep->size) ? remaining : ep->size;

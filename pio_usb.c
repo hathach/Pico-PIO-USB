@@ -34,42 +34,11 @@
 #define IRQ_RX_COMP_MASK (1 << IRQ_RX_EOP)
 #define IRQ_RX_ALL_MASK ((1 << IRQ_RX_EOP) | (1 << IRQ_RX_BS_ERR) | (1 << IRQ_RX_START))
 
-//typedef struct {
-//  uint16_t div_int;
-//  uint8_t div_frac;
-//} pio_clk_div_t;
-
-//typedef struct {
-//  PIO pio_usb_tx;  // colud not set to volatile
-//  uint sm_tx;
-//  uint offset_tx;
-//  uint tx_ch;
-//
-//  PIO pio_usb_rx;  // colud not set to volatile
-//  uint sm_rx;
-//  uint offset_rx;
-//  uint sm_eop;
-//  uint offset_eop;
-//  uint rx_reset_instr;
-//  uint device_rx_irq_num;
-//
-//  pio_clk_div_t clk_div_fs_tx;
-//  pio_clk_div_t clk_div_fs_rx;
-//  pio_clk_div_t clk_div_ls_tx;
-//  pio_clk_div_t clk_div_ls_rx;
-//
-//  bool need_pre;
-//
-//  uint8_t usb_rx_buffer[128];
-//} pio_port_t;
-
 /*static*/ usb_device_t usb_device[PIO_USB_DEVICE_CNT];
 /*static*/ pio_port_t pio_port[1];
-/*static*/ root_port_t root_port[PIO_USB_ROOT_PORT_CNT];
-
+root_port_t pio_usb_root_port[PIO_USB_ROOT_PORT_CNT];
 endpoint_t pio_usb_ep_pool[PIO_USB_EP_POOL_CNT];
 
-pio_hw_root_port_t pio_usb_root_port[PIO_USB_ROOT_PORT_CNT];
 
 #define SM_SET_CLKDIV(pio, sm, div) pio_sm_set_clkdiv_int_frac(pio, sm, div.div_int, div.div_frac)
 
@@ -253,7 +222,7 @@ void  __no_inline_not_in_flash_func(send_token)(const pio_port_t *pp, uint8_t to
 }
 
 static void __no_inline_not_in_flash_func(initialize_host_programs)(
-    pio_port_t *pp, const pio_usb_configuration_t *c, pio_hw_root_port_t *port) {
+    pio_port_t *pp, const pio_usb_configuration_t *c, root_port_t *port) {
   pp->offset_tx = pio_add_program(pp->pio_usb_tx, &usb_tx_fs_program);
   usb_tx_fs_program_init(pp->pio_usb_tx, pp->sm_tx, pp->offset_tx,
                          port->pin_dp);
@@ -289,7 +258,7 @@ static void configure_tx_channel(uint8_t ch, PIO pio, uint sm) {
 }
 
 static void apply_config(pio_port_t *pp, const pio_usb_configuration_t *c,
-                         pio_hw_root_port_t *port) {
+                         root_port_t *port) {
   pp->pio_usb_tx = c->pio_tx_num == 0 ? pio0 : pio1;
   pp->sm_tx = c->sm_tx;
   pp->tx_ch = c->tx_ch;
@@ -303,16 +272,16 @@ static void apply_config(pio_port_t *pp, const pio_usb_configuration_t *c,
   pp->debug_pin_eop = c->debug_pin_eop;
 }
 
-static void port_pin_drive_setting(const pio_hw_root_port_t *port) {
+static void port_pin_drive_setting(const root_port_t *port) {
   gpio_set_slew_rate(port->pin_dp, GPIO_SLEW_RATE_FAST);
   gpio_set_slew_rate(port->pin_dm, GPIO_SLEW_RATE_FAST);
   gpio_set_drive_strength(port->pin_dp, GPIO_DRIVE_STRENGTH_12MA);
   gpio_set_drive_strength(port->pin_dm, GPIO_DRIVE_STRENGTH_12MA);
 }
 
-void pio_usb_ll_init(pio_port_t *pp, const pio_usb_configuration_t *c, pio_hw_root_port_t* hw_root)
+void pio_usb_ll_init(pio_port_t *pp, const pio_usb_configuration_t *c, root_port_t* hw_root)
 {
-  memset(hw_root, 0, sizeof(pio_hw_root_port_t));
+  memset(hw_root, 0, sizeof(root_port_t));
 
   pp->pio_usb_tx = c->pio_tx_num == 0 ? pio0 : pio1;
   configure_tx_channel(c->tx_ch, pp->pio_usb_tx, c->sm_tx);
@@ -414,13 +383,13 @@ int __no_inline_not_in_flash_func(pio_usb_set_out_data)(endpoint_t *ep,
 
 int pio_usb_host_add_port(uint8_t pin_dp) {
   for (int idx = 0; idx < PIO_USB_ROOT_PORT_CNT; idx++) {
-    pio_hw_root_port_t* root = PIO_USB_HW_RPORT(idx);
+    root_port_t* root = PIO_USB_ROOT_PORT(idx);
     if (!root->initialized) {
       root->pin_dp = pin_dp;
       root->pin_dm = pin_dp + 1;
 
-      PIO_USB_HW_RPORT(idx)->pin_dp = pin_dp;
-      PIO_USB_HW_RPORT(idx)->pin_dm = pin_dp+1;
+      PIO_USB_ROOT_PORT(idx)->pin_dp = pin_dp;
+      PIO_USB_ROOT_PORT(idx)->pin_dm = pin_dp+1;
 
       gpio_pull_down(pin_dp);
       gpio_pull_down(pin_dp + 1);

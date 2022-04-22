@@ -26,5 +26,5 @@ static inline __force_inline endpoint_t* pio_usb_device_get_ep(uint8_t ep_addres
 {
   // index = 2*num + dir e.g out1, in1, out2, in2
   uint8_t const ep_idx =  ((ep_address & 0x7f) << 1) | (ep_address >> 7);
-  return PIO_USB_HW_EP(ep_idx);
+  return PIO_USB_ENDPOINT(ep_idx);
 }

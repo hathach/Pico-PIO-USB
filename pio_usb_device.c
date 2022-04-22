@@ -76,12 +76,12 @@ bool pio_usb_device_endpoint_open(uint8_t root_idx, uint8_t const *desc_endpoint
 usb_device_t *pio_usb_device_init(const pio_usb_configuration_t *c,
                                   const usb_descriptor_buffers_t *buffers) {
   pio_port_t *pp = &pio_port[0];
-  pio_hw_root_port_t* hw_root = PIO_USB_HW_RPORT(0);
+  root_port_t* rport = PIO_USB_ROOT_PORT(0);
 
-  pio_usb_ll_init(pp, c, hw_root);
-  hw_root->mode = PIO_USB_MODE_DEVICE;
+  pio_usb_ll_init(pp, c, rport);
+  rport->mode = PIO_USB_MODE_DEVICE;
 
-  update_ep0_crc5_lut(hw_root->dev_addr);
+  update_ep0_crc5_lut(rport->dev_addr);
 
   float const cpu_freq = (float) clock_get_hz(clk_sys);
 
@@ -157,26 +157,26 @@ static __always_inline int8_t device_receive_token(uint8_t *buffer,
 static void __no_inline_not_in_flash_func(usb_device_packet_handler)(void) {
   static uint8_t token_buf[64];
   pio_port_t *pp = &pio_port[0];
-  pio_hw_root_port_t *hw_root = PIO_USB_HW_RPORT(0);
+  root_port_t *rport = PIO_USB_ROOT_PORT(0);
 
   //
   // time critical start
   //
-  int8_t ep_num = device_receive_token(token_buf, hw_root->dev_addr);
+  int8_t ep_num = device_receive_token(token_buf, rport->dev_addr);
 
   if (token_buf[1] == USB_PID_IN) {
     if (ep_num < 0) {
       return;
     }
     bool wait_ack = false;
-    endpoint_t* ep = PIO_USB_HW_EP((ep_num << 1) | 0x01);
+    endpoint_t* ep = PIO_USB_ENDPOINT((ep_num << 1) | 0x01);
 
     pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_rx, false);
 
     if (ep->stalled) {
       send_handshake(pp, USB_PID_STALL);
     }else if (ep->has_transfer) {
-      uint16_t const xact_len = pio_usb_endpoint_transaction_len(ep);
+      uint16_t const xact_len = pio_usb_ll_endpoint_transaction_len(ep);
       usb_transfer(pp, ep->bufptr+ep->actual_len, xact_len+4);
       wait_ack = true;
     } else {
@@ -211,19 +211,19 @@ static void __no_inline_not_in_flash_func(usb_device_packet_handler)(void) {
       start_receive(pp);
 
       if (ep->ep_num == 0x80 && new_devaddr > 0) {
-        hw_root->dev_addr = new_devaddr;
+        rport->dev_addr = new_devaddr;
         new_devaddr = 0;
-        update_ep0_crc5_lut(hw_root->dev_addr);
+        update_ep0_crc5_lut(rport->dev_addr);
       }
 
-      uint16_t const xact_len = pio_usb_endpoint_transaction_len(ep);
+      uint16_t const xact_len = pio_usb_ll_endpoint_transaction_len(ep);
 
       ep->actual_len += xact_len;
       ep->data_id ^= 1;
 
       // complete if all bytes transferred
       if (ep->actual_len >= ep->total_len) {
-        pio_usb_endpoint_finish_transfer(ep, PIO_USB_INTS_ENDPOINT_COMPLETE_BITS);
+        pio_usb_ll_endpoint_complete(ep, PIO_USB_INTS_ENDPOINT_COMPLETE_BITS);
       }
     }else
     {
@@ -235,7 +235,7 @@ static void __no_inline_not_in_flash_func(usb_device_packet_handler)(void) {
     if (ep_num < 0) {
       return;
     }
-    endpoint_t* ep = PIO_USB_HW_EP(ep_num << 1);
+    endpoint_t* ep = PIO_USB_ENDPOINT(ep_num << 1);
 
     int res = receive_packet_and_ack(pp, ep->has_transfer);
     pio_sm_clear_fifos(pp->pio_usb_rx, pp->sm_rx);
@@ -250,7 +250,7 @@ static void __no_inline_not_in_flash_func(usb_device_packet_handler)(void) {
 
         // complete if all bytes transferred or short packet
         if ( (res < ep->size) || (ep->actual_len >= ep->total_len) ) {
-          pio_usb_endpoint_finish_transfer(ep, PIO_USB_INTS_ENDPOINT_COMPLETE_BITS);
+          pio_usb_ll_endpoint_complete(ep, PIO_USB_INTS_ENDPOINT_COMPLETE_BITS);
         }
       }
     }
@@ -263,42 +263,42 @@ static void __no_inline_not_in_flash_func(usb_device_packet_handler)(void) {
     restart_usb_reveiver(pp);
     irq_clear(pp->device_rx_irq_num);
 
-    //memcpy(hw_root->setup_packet, pp->usb_rx_buffer+2, 8);
-    hw_root->setup_packet = pp->usb_rx_buffer+2;
-    hw_root->ints |= PIO_USB_INTS_SETUP_REQ_BITS;
+    //memcpy(rport->setup_packet, pp->usb_rx_buffer+2, 8);
+    rport->setup_packet = pp->usb_rx_buffer+2;
+    rport->ints |= PIO_USB_INTS_SETUP_REQ_BITS;
 
     // DATA1 for both data and status stage
     //PIO_USB_HW_EP(0)->has_transfer = PIO_USB_HW_EP(1)->has_transfer = false;
-    PIO_USB_HW_EP(0)->data_id = PIO_USB_HW_EP(1)->data_id = 1;
-    PIO_USB_HW_EP(0)->stalled = PIO_USB_HW_EP(1)->stalled = false;
+    PIO_USB_ENDPOINT(0)->data_id = PIO_USB_ENDPOINT(1)->data_id = 1;
+    PIO_USB_ENDPOINT(0)->stalled = PIO_USB_ENDPOINT(1)->stalled = false;
   } else if (token_buf[1] == USB_PID_SOF) {
     // SOF interrupt
   }
 
-  if (token_buf[0] == 0 && pio_usb_ll_get_line_state(hw_root) == PORT_PIN_SE0) {
+  if (token_buf[0] == 0 && pio_usb_ll_get_line_state(rport) == PORT_PIN_SE0) {
     // Reset detected
     memset(pio_usb_ep_pool, 0, sizeof(pio_usb_ep_pool));
-    hw_root->dev_addr = 0;
-    update_ep0_crc5_lut(hw_root->dev_addr);
+    rport->dev_addr = 0;
+    update_ep0_crc5_lut(rport->dev_addr);
 
     // init endpoint control in/out
-    PIO_USB_HW_EP(0)->size = 64;
-    PIO_USB_HW_EP(0)->ep_num = 0;
-    PIO_USB_HW_EP(0)->is_tx = false;
+    PIO_USB_ENDPOINT(0)->size = 64;
+    PIO_USB_ENDPOINT(0)->ep_num = 0;
+    PIO_USB_ENDPOINT(0)->is_tx = false;
 
-    PIO_USB_HW_EP(1)->size = 64;
-    PIO_USB_HW_EP(1)->ep_num = 0x80;
-    PIO_USB_HW_EP(1)->is_tx = true;
+    PIO_USB_ENDPOINT(1)->size = 64;
+    PIO_USB_ENDPOINT(1)->ep_num = 0x80;
+    PIO_USB_ENDPOINT(1)->is_tx = true;
 
     // TODO should be reset end, this is reset start only
-    hw_root->ep_complete = hw_root->ep_stalled = hw_root->ep_error = 0;
-    hw_root->ints = PIO_USB_INTS_RESET_END_BITS;
+    rport->ep_complete = rport->ep_stalled = rport->ep_error = 0;
+    rport->ints = PIO_USB_INTS_RESET_END_BITS;
   }
 
   token_buf[0] = 0; // clear received token
   token_buf[1] = 0;
 
-  if (hw_root->ints) {
+  if (rport->ints) {
     pio_usb_device_irq_handler(0);
   }
 }

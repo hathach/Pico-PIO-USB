@@ -82,6 +82,17 @@ typedef enum {
   EVENT_HUB_PORT_CHANGE,
 } usb_device_event_t;
 
+typedef struct struct_usb_device_t usb_device_t;
+//typedef struct struct_root_port_t {
+//  volatile bool initialized;
+//  volatile bool addr0_exists;
+//  volatile bool is_fullspeed;
+//  volatile uint pin_dp;
+//  volatile uint pin_dm;
+//  volatile usb_device_event_t event;
+//  usb_device_t *root_device;
+//} root_port_t;
+
 typedef struct {
   volatile bool initialized;
   volatile bool is_fullspeed;
@@ -103,17 +114,6 @@ typedef struct {
   uint8_t dev_addr;
   //uint8_t setup_packet[8];
   uint8_t* setup_packet;
-} pio_hw_root_port_t;
-
-typedef struct struct_usb_device_t usb_device_t;
-typedef struct struct_root_port_t {
-  volatile bool initialized;
-  volatile bool addr0_exists;
-  volatile bool is_fullspeed;
-  volatile uint pin_dp;
-  volatile uint pin_dm;
-  volatile usb_device_event_t event;
-  usb_device_t *root_device;
 } root_port_t;
 
 struct struct_usb_device_t {
@@ -382,44 +382,3 @@ typedef struct {
   const uint8_t **hid_report;
   const string_descriptor_t *string;
 } usb_descriptor_buffers_t;
-
-#include "hardware/pio.h"
-
-typedef struct {
-  uint16_t div_int;
-  uint8_t div_frac;
-} pio_clk_div_t;
-
-typedef struct {
-  PIO pio_usb_tx;  // could not set to volatile
-  uint sm_tx;
-  uint offset_tx;
-  uint tx_ch;
-
-  PIO pio_usb_rx;  // could not set to volatile
-  uint sm_rx;
-  uint offset_rx;
-  uint sm_eop;
-  uint offset_eop;
-  uint rx_reset_instr;
-  uint device_rx_irq_num;
-
-  int8_t debug_pin_rx;
-  int8_t debug_pin_eop;
-
-  pio_clk_div_t clk_div_fs_tx;
-  pio_clk_div_t clk_div_fs_rx;
-  pio_clk_div_t clk_div_ls_tx;
-  pio_clk_div_t clk_div_ls_rx;
-
-  bool need_pre;
-
-  uint8_t usb_rx_buffer[128];
-} pio_port_t;
-
-typedef enum{
-  PORT_PIN_SE0 = 0b00,
-  PORT_PIN_FS_IDLE = 0b01,
-  PORT_PIN_LS_IDLE = 0b10,
-  PORT_PIN_SE1 = 0b11,
-} port_pin_status_t;

@@ -77,11 +77,11 @@ static void stop_timer(void) {
 
 bool pio_usb_host_init(const pio_usb_configuration_t *c)
 {
-  pio_port_t *pp = PIO_USB_HW_PIO(0);
-  pio_hw_root_port_t* hw_root = PIO_USB_HW_RPORT(0);
+  pio_port_t *pp = PIO_USB_PIO_PORT(0);
+  root_port_t* rport = PIO_USB_ROOT_PORT(0);
 
-  pio_usb_ll_init(pp, c, hw_root);
-  hw_root->mode = PIO_USB_MODE_HOST;
+  pio_usb_ll_init(pp, c, rport);
+  rport->mode = PIO_USB_MODE_HOST;
 
   float const cpu_freq = (float) clock_get_hz(clk_sys);
   pio_calculate_clkdiv_from_float(cpu_freq / 48000000,
@@ -148,7 +148,7 @@ void pio_usb_host_restart(void) {
 }
 
 /*static*/ void __no_inline_not_in_flash_func(configure_fullspeed_host)(
-    pio_port_t const *pp, pio_hw_root_port_t *port) {
+    pio_port_t const *pp, root_port_t *port) {
   override_pio_program(pp->pio_usb_tx, &usb_tx_fs_program, pp->offset_tx);
   SM_SET_CLKDIV(pp->pio_usb_tx, pp->sm_tx, pp->clk_div_fs_tx);
 
@@ -168,7 +168,7 @@ void pio_usb_host_restart(void) {
 }
 
 /*static*/ void __no_inline_not_in_flash_func(configure_lowspeed_host)(
-    pio_port_t const *pp, pio_hw_root_port_t *port) {
+    pio_port_t const *pp, root_port_t *port) {
   override_pio_program(pp->pio_usb_tx, &usb_tx_ls_program, pp->offset_tx);
   SM_SET_CLKDIV(pp->pio_usb_tx, pp->sm_tx, pp->clk_div_ls_tx);
 
@@ -188,7 +188,7 @@ void pio_usb_host_restart(void) {
 }
 
 /*static*/ void __no_inline_not_in_flash_func(configure_root_port)(
-    pio_port_t *pp, pio_hw_root_port_t *root) {
+    pio_port_t *pp, root_port_t *root) {
   if (root->is_fullspeed) {
     configure_fullspeed_host(pp, root);
   } else {
@@ -214,7 +214,7 @@ void pio_usb_host_restart(void) {
 //
 //--------------------------------------------------------------------+
 
-/*static*/ bool __no_inline_not_in_flash_func(connection_check)(pio_hw_root_port_t *port) {
+/*static*/ bool __no_inline_not_in_flash_func(connection_check)(root_port_t *port) {
   if (pio_usb_ll_get_line_state(port) == PORT_PIN_SE0) {
     busy_wait_us_32(1);
 
@@ -240,26 +240,26 @@ static bool __no_inline_not_in_flash_func(sof_timer)(repeating_timer_t *_rt) {
 
   // Send SOF
   for (int root_idx = 0; root_idx < PIO_USB_ROOT_PORT_CNT; root_idx++) {
-    pio_hw_root_port_t *hw_root = PIO_USB_HW_RPORT(root_idx);
-    if (!(hw_root->initialized && hw_root->connected &&
-         !hw_root->suspended && connection_check(hw_root))) {
+    root_port_t *rport = PIO_USB_ROOT_PORT(root_idx);
+    if (!(rport->initialized && rport->connected &&
+         !rport->suspended && connection_check(rport))) {
       continue;
     }
-    configure_root_port(pp, hw_root);
+    configure_root_port(pp, rport);
     usb_transfer(pp, sof_packet, 4);
   }
 
   // Carry out all queued endpoint transaction
   for (int root_idx = 0; root_idx < PIO_USB_ROOT_PORT_CNT; root_idx++) {
-    pio_hw_root_port_t *hw_root = PIO_USB_HW_RPORT(root_idx);
-    if (!(hw_root->initialized && hw_root->connected && !hw_root->suspended)) {
+    root_port_t *rport = PIO_USB_ROOT_PORT(root_idx);
+    if (!(rport->initialized && rport->connected && !rport->suspended)) {
       continue;
     }
 
-    configure_root_port(pp, hw_root);
+    configure_root_port(pp, rport);
 
     for (int ep_pool_idx = 0; ep_pool_idx < PIO_USB_EP_POOL_CNT; ep_pool_idx++) {
-      endpoint_t *ep = PIO_USB_HW_EP(ep_pool_idx);
+      endpoint_t *ep = PIO_USB_ENDPOINT(ep_pool_idx);
 
       if (ep->root_idx == root_idx && ep->size && ep->has_transfer) {
         uint32_t result = 0;
@@ -284,7 +284,7 @@ static bool __no_inline_not_in_flash_func(sof_timer)(repeating_timer_t *_rt) {
         }
 
         if (result) {
-          pio_usb_endpoint_finish_transfer(ep, result);
+          pio_usb_ll_endpoint_complete(ep, result);
         }
       }
     }
@@ -292,21 +292,21 @@ static bool __no_inline_not_in_flash_func(sof_timer)(repeating_timer_t *_rt) {
 
   // check for new connection to root hub
   for (int root_idx = 0; root_idx < PIO_USB_ROOT_PORT_CNT; root_idx++) {
-    pio_hw_root_port_t *hw_root = PIO_USB_HW_RPORT(root_idx);
-    if ( hw_root->initialized && !hw_root->connected) {
-      port_pin_status_t const line_state = pio_usb_ll_get_line_state(hw_root);
+    root_port_t *rport = PIO_USB_ROOT_PORT(root_idx);
+    if ( rport->initialized && !rport->connected) {
+      port_pin_status_t const line_state = pio_usb_ll_get_line_state(rport);
       if ( line_state == PORT_PIN_FS_IDLE || line_state == PORT_PIN_LS_IDLE) {
-        hw_root->is_fullspeed = (line_state == PORT_PIN_FS_IDLE);
-        hw_root->connected = true;
-        hw_root->suspended = true; // need a bus reset before operating
-        hw_root->ints |= PIO_USB_INTS_CONNECT_BITS;
+        rport->is_fullspeed = (line_state == PORT_PIN_FS_IDLE);
+        rport->connected = true;
+        rport->suspended = true; // need a bus reset before operating
+        rport->ints |= PIO_USB_INTS_CONNECT_BITS;
       }
     }
   }
 
   // Invoke IRQHandler if interrupt status is set
   for (uint8_t root_idx = 0; root_idx < PIO_USB_ROOT_PORT_CNT; root_idx++) {
-    if (PIO_USB_HW_RPORT(root_idx)->ints) {
+    if (PIO_USB_ROOT_PORT(root_idx)->ints) {
       pio_usb_host_irq_handler(root_idx);
     }
   }
@@ -324,8 +324,8 @@ static bool __no_inline_not_in_flash_func(sof_timer)(repeating_timer_t *_rt) {
 
 void pio_usb_host_port_reset_start(uint8_t root_idx)
 {
-  pio_hw_root_port_t *root = PIO_USB_HW_RPORT(root_idx);
-  pio_port_t *pp = PIO_USB_HW_PIO(0);
+  root_port_t *root = PIO_USB_ROOT_PORT(root_idx);
+  pio_port_t *pp = PIO_USB_PIO_PORT(0);
 
   // bus is not operating while in reset
   root->suspended = true;
@@ -339,8 +339,8 @@ void pio_usb_host_port_reset_start(uint8_t root_idx)
 
 void pio_usb_host_port_reset_end(uint8_t root_idx)
 {
-  pio_hw_root_port_t *root = PIO_USB_HW_RPORT(root_idx);
-  pio_port_t *pp = PIO_USB_HW_PIO(0);
+  root_port_t *root = PIO_USB_ROOT_PORT(root_idx);
+  pio_port_t *pp = PIO_USB_PIO_PORT(0);
 
   // line state to input
   pio_sm_set_pindirs_with_mask(pp->pio_usb_tx, pp->sm_tx, (0b00u << root->pin_dp),
@@ -355,7 +355,7 @@ void pio_usb_host_port_reset_end(uint8_t root_idx)
 void pio_usb_host_close_device(uint8_t root_idx, uint8_t device_address)
 {
   for (int ep_pool_idx = 0; ep_pool_idx < PIO_USB_EP_POOL_CNT; ep_pool_idx++) {
-    endpoint_t *ep = PIO_USB_HW_EP(ep_pool_idx);
+    endpoint_t *ep = PIO_USB_ENDPOINT(ep_pool_idx);
     if ( (ep->root_idx == root_idx) && (ep->dev_addr == device_address) && ep->size){
       ep->size = 0;
       ep->has_transfer = false;
@@ -365,7 +365,7 @@ void pio_usb_host_close_device(uint8_t root_idx, uint8_t device_address)
 
 endpoint_t* _find_ep(uint8_t root_idx, uint8_t device_address, uint8_t ep_address) {
   for (int ep_pool_idx = 0; ep_pool_idx < PIO_USB_EP_POOL_CNT; ep_pool_idx++) {
-    endpoint_t *ep = PIO_USB_HW_EP(ep_pool_idx);
+    endpoint_t *ep = PIO_USB_ENDPOINT(ep_pool_idx);
     // note 0x00 and 0x80 are matched as control endpoint of opposite direction
     if ( (ep->root_idx == root_idx) && (ep->dev_addr == device_address) && ep->size &&
          ((ep->ep_num == ep_address) || (((ep_address & 0x7f) == 0) && ((ep->ep_num & 0x7f) == 0)) ) ) {
@@ -380,9 +380,9 @@ bool pio_usb_host_endpoint_open(uint8_t root_idx, uint8_t device_address, uint8_
   const endpoint_descriptor_t *d = (const endpoint_descriptor_t *) desc_endpoint;
 
   for (int ep_pool_idx = 0; ep_pool_idx < PIO_USB_EP_POOL_CNT; ep_pool_idx++) {
-    endpoint_t *ep = PIO_USB_HW_EP(ep_pool_idx);
+    endpoint_t *ep = PIO_USB_ENDPOINT(ep_pool_idx);
     // ep size is used as valid indicator
-    if (PIO_USB_HW_EP(ep_pool_idx)->size == 0) {
+    if (PIO_USB_ENDPOINT(ep_pool_idx)->size == 0) {
       pio_usb_ll_endpoint_configure(ep, desc_endpoint);
       ep->root_idx = root_idx;
       ep->dev_addr = device_address;
@@ -475,7 +475,7 @@ static uint32_t __no_inline_not_in_flash_func(endpoint_in_transaction)(pio_port_
 static uint32_t __no_inline_not_in_flash_func(endpoint_out_transaction)(pio_port_t* pp, endpoint_t * ep) {
   uint32_t res = 0;
 
-  uint16_t const xact_len = pio_usb_endpoint_transaction_len(ep);
+  uint16_t const xact_len = pio_usb_ll_endpoint_transaction_len(ep);
 
   prepare_receive(pp);
   send_token(pp, USB_PID_OUT, ep->dev_addr, ep->ep_num);
