@@ -66,9 +66,15 @@ usb_device_t *pio_usb_device_init(const pio_usb_configuration_t *c,
                                   const usb_descriptor_buffers_t *buffers) {
   pio_port_t *pp = PIO_USB_PIO_PORT(0);
   root_port_t* rport = PIO_USB_ROOT_PORT(0);
+  usb_device_t *dev = &pio_usb_device[0];
 
   pio_usb_bus_init(pp, c, rport);
   rport->mode = PIO_USB_MODE_DEVICE;
+
+  memset(dev, 0, sizeof(*dev));
+  for (int i = 0; i < PIO_USB_DEV_EP_CNT; i++) {
+    dev->endpoint_id[i] = i + 1;
+  }
 
   update_ep0_crc5_lut(rport->dev_addr);
 
@@ -95,7 +101,7 @@ usb_device_t *pio_usb_device_init(const pio_usb_configuration_t *c,
   irq_set_exclusive_handler(pp->device_rx_irq_num, usb_device_packet_handler);
   irq_set_enabled(pp->device_rx_irq_num, true);
 
-  return NULL;
+  return dev;
 }
 
 void pio_usb_device_set_address(uint8_t root_idx, uint8_t dev_addr) {
@@ -388,7 +394,7 @@ static int __no_inline_not_in_flash_func(process_device_setup_stage)(
     if (packet->request == 0x09) {
       // set hid report
       static __unused uint8_t received_hid_report[8]; // not used
-      prepare_ep0_data(received_hid_report, 8);
+      prepare_ep0_rx(received_hid_report, 8);
       res = 0;
     } else if (packet->request == 0x0A) {
       // set hid idle request
@@ -413,7 +419,10 @@ void __attribute__((weak)) __no_inline_not_in_flash_func(pio_usb_device_irq_hand
 
   if (ints & PIO_USB_INTS_RESET_END_BITS)
   {
-
+    memset(dev, 0, sizeof(*dev));
+    for (int i = 0; i < PIO_USB_DEV_EP_CNT; i++) {
+      pio_usb_device[0].endpoint_id[i] = i + 1;
+    }
   }
 
   if (ints & PIO_USB_INTS_SETUP_REQ_BITS)
