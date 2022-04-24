@@ -82,6 +82,8 @@ enum {
   PIO_USB_MODE_HOST,
 };
 
+extern usb_device_t pio_usb_device[PIO_USB_DEVICE_CNT];
+
 extern root_port_t pio_usb_root_port[PIO_USB_ROOT_PORT_CNT];
 #define PIO_USB_ROOT_PORT(_idx)    (pio_usb_root_port + (_idx))
 
@@ -90,7 +92,6 @@ extern endpoint_t pio_usb_ep_pool[PIO_USB_EP_POOL_CNT];
 
 extern pio_port_t pio_port[1];
 #define PIO_USB_PIO_PORT(_idx)    (pio_port + (_idx))
-
 
 //--------------------------------------------------------------------+
 // Bus functions
@@ -128,29 +129,12 @@ static __always_inline port_pin_status_t pio_usb_bus_get_line_state(root_port_t*
 // Low Level functions
 //--------------------------------------------------------------------+
 
-void pio_usb_ll_endpoint_configure(endpoint_t * ep, uint8_t const* desc_endpoint);
-bool pio_usb_ll_endpoint_transfer(endpoint_t * ep, uint8_t* buffer, uint16_t buflen);
+void pio_usb_ll_configure_endpoint(endpoint_t * ep, uint8_t const* desc_endpoint);
+bool pio_usb_ll_transfer_start(endpoint_t * ep, uint8_t* buffer, uint16_t buflen);
+bool pio_usb_ll_transfer_continue(endpoint_t * ep, uint16_t xferred_bytes);
+void pio_usb_ll_transfer_complete(endpoint_t * ep, uint32_t flag);
 
-static inline __force_inline void pio_usb_ll_endpoint_complete(endpoint_t * ep, uint32_t flag) {
-  root_port_t *rport = PIO_USB_ROOT_PORT(ep->root_idx);
-  uint32_t const ep_mask = (1u << (ep-pio_usb_ep_pool));
-
-  rport->ints |= flag;
-
-  if (flag == PIO_USB_INTS_ENDPOINT_COMPLETE_BITS) {
-    rport->ep_complete |= ep_mask;
-  }else if (flag == PIO_USB_INTS_ENDPOINT_ERROR_BITS) {
-    rport->ep_error |= ep_mask;
-  }else if (flag == PIO_USB_INTS_ENDPOINT_STALLED_BITS) {
-    rport->ep_stalled |= ep_mask;
-  }else {
-    // something wrong
-  }
-
-  ep->has_transfer = false;
-}
-
-static inline __force_inline uint16_t pio_usb_ll_endpoint_transaction_len(endpoint_t * ep)
+static inline __force_inline uint16_t pio_usb_ll_get_transaction_len(endpoint_t * ep)
 {
   uint16_t remaining = ep->total_len - ep->actual_len;
   return (remaining < ep->size) ? remaining : ep->size;
@@ -183,7 +167,7 @@ void pio_usb_device_set_address(uint8_t root_idx, uint8_t dev_addr);
 bool pio_usb_device_endpoint_open(uint8_t root_idx, uint8_t const *desc_endpoint);
 bool pio_usb_device_endpoint_transfer(uint8_t root_idx, uint8_t ep_address, uint8_t* buffer, uint16_t buflen);
 
-static inline __force_inline endpoint_t* pio_usb_device_get_endpoint_by_address(uint8_t ep_address)
+static inline __force_inline endpoint_t* pio_usb_device_get_endpoint_by_address(uint8_t root_idx, uint8_t ep_address)
 {
   // index = 2*num + dir e.g out1, in1, out2, in2
   uint8_t const ep_idx =  ((ep_address & 0x7f) << 1) | (ep_address >> 7);

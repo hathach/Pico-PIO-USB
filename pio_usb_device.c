@@ -25,6 +25,9 @@
 static uint8_t new_devaddr = 0;
 static uint8_t ep0_crc5_lut[16];
 
+// unused if using tinyusb
+static __unused usb_descriptor_buffers_t descriptor_buffers;
+
 static void __no_inline_not_in_flash_func(usb_device_packet_handler)(void);
 
 /*static*/ void __no_inline_not_in_flash_func(update_ep0_crc5_lut)(uint8_t addr) {
@@ -48,9 +51,9 @@ static __always_inline void restart_usb_reveiver(pio_port_t *pp) {
 bool pio_usb_device_endpoint_open(uint8_t root_idx, uint8_t const *desc_endpoint)
 {
   const endpoint_descriptor_t *d = (const endpoint_descriptor_t *) desc_endpoint;
-  endpoint_t *ep = pio_usb_device_get_endpoint_by_address(d->epaddr);
+  endpoint_t *ep = pio_usb_device_get_endpoint_by_address(root_idx, d->epaddr);
 
-  pio_usb_ll_endpoint_configure(ep, desc_endpoint);
+  pio_usb_ll_configure_endpoint(ep, desc_endpoint);
   ep->root_idx = root_idx;
   ep->dev_addr = 0; // not used
   ep->need_pre = 0;
@@ -77,6 +80,8 @@ usb_device_t *pio_usb_device_init(const pio_usb_configuration_t *c,
   pio_calculate_clkdiv_from_float(cpu_freq / 96000000,
                                   &pp->clk_div_fs_rx.div_int,
                                   &pp->clk_div_fs_rx.div_frac);
+
+  descriptor_buffers = *buffers;
 
   pio_sm_set_enabled(pp->pio_usb_tx, pp->sm_tx, true);
   pio_usb_bus_prepare_receive(pp);
@@ -156,14 +161,14 @@ static void __no_inline_not_in_flash_func(usb_device_packet_handler)(void) {
     }
     bool wait_ack = false;
     endpoint_t* ep = PIO_USB_ENDPOINT((ep_num << 1) | 0x01);
+    uint16_t const xact_len = pio_usb_ll_get_transaction_len(ep);
 
     pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_rx, false);
 
     if (ep->stalled) {
       pio_usb_bus_send_handshake(pp, USB_PID_STALL);
     }else if (ep->has_transfer) {
-      uint16_t const xact_len = pio_usb_ll_endpoint_transaction_len(ep);
-      pio_usb_bus_usb_transfer(pp, ep->bufptr+ep->actual_len, xact_len+4);
+      pio_usb_bus_usb_transfer(pp, ep->buffer, xact_len+4);
       wait_ack = true;
     } else {
       pio_usb_bus_send_handshake(pp, USB_PID_NAK);
@@ -202,15 +207,7 @@ static void __no_inline_not_in_flash_func(usb_device_packet_handler)(void) {
         update_ep0_crc5_lut(rport->dev_addr);
       }
 
-      uint16_t const xact_len = pio_usb_ll_endpoint_transaction_len(ep);
-
-      ep->actual_len += xact_len;
-      ep->data_id ^= 1;
-
-      // complete if all bytes transferred
-      if (ep->actual_len >= ep->total_len) {
-        pio_usb_ll_endpoint_complete(ep, PIO_USB_INTS_ENDPOINT_COMPLETE_BITS);
-      }
+      pio_usb_ll_transfer_continue(ep, xact_len);
     }else
     {
       pp->pio_usb_rx->irq = IRQ_RX_ALL_MASK;
@@ -231,14 +228,8 @@ static void __no_inline_not_in_flash_func(usb_device_packet_handler)(void) {
 
     if (ep->has_transfer) {
       if (res >= 0) {
-        memcpy(ep->bufptr+ep->actual_len, pp->usb_rx_buffer, res);
-        ep->actual_len += res;
-        ep->data_id ^= 1;
-
-        // complete if all bytes transferred or short packet
-        if ( (res < ep->size) || (ep->actual_len >= ep->total_len) ) {
-          pio_usb_ll_endpoint_complete(ep, PIO_USB_INTS_ENDPOINT_COMPLETE_BITS);
-        }
+        memcpy(ep->app_buf, pp->usb_rx_buffer, res);
+        pio_usb_ll_transfer_continue(ep, res);
       }
     }
   } else if (token_buf[1] == USB_PID_SETUP) {
@@ -289,6 +280,175 @@ static void __no_inline_not_in_flash_func(usb_device_packet_handler)(void) {
     pio_usb_device_irq_handler(0);
   }
 }
+
+//--------------------------------------------------------------------+
+// Device Stack implementation
+//--------------------------------------------------------------------+
+
+static usb_descriptor_buffers_t descriptor_buffers;
+static int8_t ep0_desc_request_type = -1;
+static uint16_t ep0_desc_request_len;
+static uint8_t ep0_desc_request_idx;
+
+static void __no_inline_not_in_flash_func(prepare_ep0_data)(uint8_t *data,
+                                                              uint8_t len) {
+  usb_device_t *dev = &pio_usb_device[0];
+  control_pipe_t *p = &dev->control_pipe;
+  endpoint_t *ep = &pio_usb_ep_pool[1]; // 0: control out, 1 : control in
+
+  p->request_length = len;
+  p->rx_buffer = data;
+  p->buffer_idx = 0;
+
+  uint8_t packet_len =
+      p->request_length > PIO_USB_EP_SIZE ? PIO_USB_EP_SIZE : p->request_length;
+  pio_usb_ll_transfer_start(ep, (uint8_t *) (uintptr_t) &p->rx_buffer[p->buffer_idx], packet_len);
+}
+
+void pio_usb_device_task(void) {
+  switch (ep0_desc_request_type) {
+    case DESC_TYPE_CONFIG: {
+      uint16_t req_len = ep0_desc_request_len;
+      uint16_t desc_len =
+          descriptor_buffers.config[2] | (descriptor_buffers.config[3] << 8);
+      req_len = req_len > desc_len ? desc_len : req_len;
+      prepare_ep0_data((uint8_t *)descriptor_buffers.config, req_len);
+      ep0_desc_request_type = -1;
+    } break;
+    case DESC_TYPE_STRING: {
+      const uint16_t *str =
+          (uint16_t *)&descriptor_buffers.string[ep0_desc_request_idx];
+      prepare_ep0_data((uint8_t *)str, str[0] & 0xff);
+      ep0_desc_request_type = -1;
+    } break;
+    case DESC_TYPE_HID_REPORT:{
+      prepare_ep0_data(
+          (uint8_t *)descriptor_buffers.hid_report[ep0_desc_request_idx],
+          ep0_desc_request_len);
+      ep0_desc_request_type = -1;
+    }
+    default:
+      break;
+  }
+}
+
+static int __no_inline_not_in_flash_func(process_device_setup_stage)(
+    uint8_t *buffer) {
+  int res = -1;
+  const usb_setup_packet_t *packet = (usb_setup_packet_t *)buffer;
+
+  if (packet->request_type == USB_REQ_DIR_IN) {
+    if (packet->request == 0x06) {
+      if (packet->value_msb == DESC_TYPE_DEVICE) {
+        prepare_ep0_data((uint8_t *)descriptor_buffers.device, 18);
+        res = 0;
+      } else if (packet->value_msb == DESC_TYPE_CONFIG) {
+        ep0_desc_request_len = (packet->length_lsb | (packet->length_msb << 8));
+        ep0_desc_request_type = DESC_TYPE_CONFIG;
+        res = 0;
+      } else if (packet->value_msb == DESC_TYPE_STRING) {
+        if (descriptor_buffers.string != NULL) {
+          ep0_desc_request_idx = packet->value_lsb;
+          ep0_desc_request_type = DESC_TYPE_STRING;
+          res = 0;
+        }
+      }
+    }
+  } else if (packet->request_type == USB_REQ_DIR_OUT) {
+    if (packet->request == 0x05) {
+      // set address
+      new_devaddr = packet->value_lsb;
+      prepare_ep0_data(NULL, 0);
+      res = 0;
+    } else if (packet->request == 0x09) {
+      // set configuration
+      prepare_ep0_data(NULL, 0);
+      res = 0;
+    }
+  } else if (packet->request_type == (USB_REQ_DIR_IN | USB_REQ_REC_IFACE)) {
+    if (packet->request == 0x06 && packet->value_msb == DESC_TYPE_HID_REPORT) {
+      // get hid report desc
+      ep0_desc_request_len = (packet->length_lsb | (packet->length_msb << 8));
+      ep0_desc_request_idx = packet->index_lsb;
+      ep0_desc_request_type = DESC_TYPE_HID_REPORT;
+      res = 0;
+    }
+  } else if (packet->request_type == (USB_REQ_TYP_CLASS | USB_REQ_REC_IFACE)) {
+    if (packet->request == 0x09) {
+      // set hid report
+      prepare_ep0_data(NULL, 0);
+      res = 0;
+    } else if (packet->request == 0x0A) {
+      // set hid idle request
+      prepare_ep0_data(NULL, 0);
+      res = 0;
+    } else if (packet->request == 0x0B) {
+      // set hid protocol request
+      prepare_ep0_data(NULL, 0);
+      res = 0;
+    }
+  }
+
+  return res;
+}
+
+#if 0
+void __attribute__((weak)) __no_inline_not_in_flash_func(pio_usb_device_irq_handler)(uint8_t root_idx) {
+  root_port_t* root = PIO_USB_ROOT_PORT(root_idx);
+  usb_device_t *dev = &pio_usb_device[0];
+  pio_port_t *pp = &pio_port[0];
+
+  uint32_t const ints = root->ints;
+
+  if (ints & PIO_USB_INTS_RESET_END_BITS)
+  {
+
+  }
+
+  if (ints & PIO_USB_INTS_SETUP_REQ_BITS)
+  {
+    process_device_setup_stage(root->setup_packet);
+    dev->control_pipe.stage = STAGE_DATA;
+  }
+
+  if ( ints & PIO_USB_INTS_ENDPOINT_COMPLETE_BITS )
+  {
+    const uint32_t ep_all = root->ep_complete;
+
+    // control out
+    if ( ep_all & 0x01 ) {
+      if (dev->control_pipe.stage == STAGE_STATUS) {
+        dev->control_pipe.stage = STAGE_COMPLETE;
+      } else if (dev->control_pipe.stage == STAGE_DATA) {
+        dev->control_pipe.stage = STAGE_STATUS;
+        prepare_ep0_data(NULL, 0);
+      }
+    }
+
+    // control in
+    if ( ep_all & 0x02 ) {
+
+    }
+
+//    for(uint8_t ep_idx = 0; ep_idx < PIO_USB_EP_POOL_CNT; ep_idx++)
+//    {
+//      uint32_t const mask = (1u << ep_idx);
+//
+//      if (ep_all & mask)
+//      {
+//        endpoint_t* ep = PIO_USB_ENDPOINT(ep_idx);
+//        dcd_event_xfer_complete(tu_rhport, ep->ep_num, ep->actual_len, result, true);
+//      }
+//    }
+
+    // clear all
+    root->ep_complete &= ~ep_all;
+  }
+
+  // clear all
+  root->ints &= ~ints;
+}
+#endif
 
 #pragma GCC pop_options
 

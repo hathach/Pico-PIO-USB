@@ -29,9 +29,9 @@ static uint32_t int_stat;
 
 static bool sof_timer(repeating_timer_t *_rt);
 
-static uint32_t endpoint_setup_transaction( pio_port_t *pp,  endpoint_t *ep);
-static uint32_t endpoint_in_transaction(pio_port_t* pp, endpoint_t * ep);
-static uint32_t endpoint_out_transaction(pio_port_t* pp, endpoint_t * ep);
+static int usb_setup_transaction( pio_port_t *pp,  endpoint_t *ep);
+static int usb_in_transaction(pio_port_t* pp, endpoint_t * ep);
+static int usb_out_transaction(pio_port_t* pp, endpoint_t * ep);
 
 //--------------------------------------------------------------------+
 //
@@ -58,7 +58,7 @@ static void stop_timer(void) {
   timer_active = false;
 }
 
-bool pio_usb_host_init(const pio_usb_configuration_t *c)
+usb_device_t * pio_usb_host_init(const pio_usb_configuration_t *c)
 {
   pio_port_t *pp = PIO_USB_PIO_PORT(0);
   root_port_t* rport = PIO_USB_ROOT_PORT(0);
@@ -84,7 +84,7 @@ bool pio_usb_host_init(const pio_usb_configuration_t *c)
   _alarm_pool = alarm_pool_create(2, 1);
   start_timer(_alarm_pool);
 
-  return true;
+  return &pio_usb_device[0];
 }
 
 void pio_usb_host_stop(void) {
@@ -247,22 +247,18 @@ static bool __no_inline_not_in_flash_func(sof_timer)(repeating_timer_t *_rt) {
         }
 
         if (ep->ep_num == 0 && ep->data_id == USB_PID_SETUP) {
-          result = endpoint_setup_transaction(pp, ep);
+          result = usb_setup_transaction(pp, ep);
         }else {
           if ( ep->ep_num & 0x80 ) {
-            result = endpoint_in_transaction(pp, ep);
+            result = usb_in_transaction(pp, ep);
           }else{
-            result = endpoint_out_transaction(pp, ep);
+            result = usb_out_transaction(pp, ep);
           }
         }
 
         if (ep->need_pre) {
           pp->need_pre = false;
           restore_fs_bus(pp);
-        }
-
-        if (result) {
-          pio_usb_ll_endpoint_complete(ep, result);
         }
       }
     }
@@ -361,7 +357,7 @@ bool pio_usb_host_endpoint_open(uint8_t root_idx, uint8_t device_address, uint8_
     endpoint_t *ep = PIO_USB_ENDPOINT(ep_pool_idx);
     // ep size is used as valid indicator
     if (PIO_USB_ENDPOINT(ep_pool_idx)->size == 0) {
-      pio_usb_ll_endpoint_configure(ep, desc_endpoint);
+      pio_usb_ll_configure_endpoint(ep, desc_endpoint);
       ep->root_idx = root_idx;
       ep->dev_addr = device_address;
       ep->need_pre = need_pre;
@@ -381,7 +377,7 @@ bool pio_usb_host_send_setup(uint8_t root_idx, uint8_t device_address, uint8_t c
   ep->data_id = USB_PID_SETUP;
   ep->is_tx = true;
 
-  pio_usb_ll_endpoint_transfer(ep, (uint8_t*) setup_packet, 8);
+  pio_usb_ll_transfer_start(ep, (uint8_t*) setup_packet, 8);
 
   return true;
 }
@@ -400,7 +396,7 @@ bool pio_usb_host_endpoint_transfer(uint8_t root_idx, uint8_t device_address, ui
     ep->is_tx = (ep_address == 0) ? true : false;
   }
 
-  pio_usb_ll_endpoint_transfer(ep, buffer, buflen);
+  pio_usb_ll_transfer_start(ep, buffer, buflen);
 
   return true;
 }
@@ -409,9 +405,8 @@ bool pio_usb_host_endpoint_transfer(uint8_t root_idx, uint8_t device_address, ui
 //
 //--------------------------------------------------------------------+
 
-static uint32_t __no_inline_not_in_flash_func(endpoint_in_transaction)(pio_port_t* pp, endpoint_t * ep) {
-  uint32_t res = 0;
-
+static int __no_inline_not_in_flash_func(usb_in_transaction)(pio_port_t* pp, endpoint_t * ep) {
+  int res = 0;
   uint8_t expect_pid = (ep->data_id == 1) ? USB_PID_DATA1 : USB_PID_DATA0;
 
   pio_usb_bus_prepare_receive(pp);
@@ -423,24 +418,21 @@ static uint32_t __no_inline_not_in_flash_func(endpoint_in_transaction)(pio_port_
 
   if (receive_len >= 0) {
     if (receive_pid == expect_pid) {
-      // skip crc16 check
-      memcpy(ep->bufptr+ep->actual_len, &pp->usb_rx_buffer[2], receive_len);
-      ep->actual_len += receive_len;
-      ep->data_id ^= 1;
-
-      // complete if all bytes transferred or short packet
-      if ( (receive_len < ep->size) || (ep->actual_len >= ep->total_len) ) {
-        res = PIO_USB_INTS_ENDPOINT_COMPLETE_BITS;
-      }
+      memcpy(ep->app_buf, &pp->usb_rx_buffer[2], receive_len);
+      pio_usb_ll_transfer_continue(ep, receive_len);
     }else {
       // DATA0/1 mismatched, 0 for re-try next frame
     }
   } else if (receive_pid == USB_PID_NAK) {
     // NAK try again next frame
   } else if (receive_pid == USB_PID_STALL) {
-    res = PIO_USB_INTS_ENDPOINT_STALLED_BITS;
+    pio_usb_ll_transfer_complete(ep, PIO_USB_INTS_ENDPOINT_STALLED_BITS);
   }else {
-    res = PIO_USB_INTS_ENDPOINT_ERROR_BITS;
+    res = -1;
+    if ((pp->pio_usb_rx->irq & IRQ_RX_COMP_MASK) == 0) {
+      res = -2;
+    }
+    pio_usb_ll_transfer_complete(ep, PIO_USB_INTS_ENDPOINT_ERROR_BITS);
   }
 
   pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_rx, false);
@@ -450,10 +442,10 @@ static uint32_t __no_inline_not_in_flash_func(endpoint_in_transaction)(pio_port_
   return res;
 }
 
-static uint32_t __no_inline_not_in_flash_func(endpoint_out_transaction)(pio_port_t* pp, endpoint_t * ep) {
-  uint32_t res = 0;
+static int __no_inline_not_in_flash_func(usb_out_transaction)(pio_port_t* pp, endpoint_t * ep) {
+  int res = 0;
 
-  uint16_t const xact_len = pio_usb_ll_endpoint_transaction_len(ep);
+  uint16_t const xact_len = pio_usb_ll_get_transaction_len(ep);
 
   pio_usb_bus_prepare_receive(pp);
   pio_usb_bus_send_token(pp, USB_PID_OUT, ep->dev_addr, ep->ep_num);
@@ -462,7 +454,7 @@ static uint32_t __no_inline_not_in_flash_func(endpoint_out_transaction)(pio_port
     continue;
   }
 
-  pio_usb_bus_usb_transfer(pp, ep->bufptr+ep->actual_len, xact_len+4);
+  pio_usb_bus_usb_transfer(pp, ep->buffer, xact_len+4);
   pio_usb_bus_start_receive(pp);
 
   pio_usb_bus_wait_handshake(pp);
@@ -470,19 +462,13 @@ static uint32_t __no_inline_not_in_flash_func(endpoint_out_transaction)(pio_port
   uint8_t const receive_token = pp->usb_rx_buffer[1];
 
   if (receive_token == USB_PID_ACK) {
-    ep->actual_len += xact_len;
-    ep->data_id ^= 1;
-
-    // complete if all bytes are transferred
-    if ( ep->actual_len >= ep->total_len ) {
-      res = PIO_USB_INTS_ENDPOINT_COMPLETE_BITS;
-    }
+    pio_usb_ll_transfer_continue(ep, xact_len);
   } else if (receive_token == USB_PID_NAK) {
     // NAK try again next frame
   } else if (receive_token == USB_PID_STALL) {
-    res = PIO_USB_INTS_ENDPOINT_STALLED_BITS;
+    pio_usb_ll_transfer_complete(ep, PIO_USB_INTS_ENDPOINT_STALLED_BITS);
   }else {
-    res = PIO_USB_INTS_ENDPOINT_ERROR_BITS;
+    pio_usb_ll_transfer_complete(ep, PIO_USB_INTS_ENDPOINT_ERROR_BITS);
   }
 
   pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_rx, false);
@@ -492,10 +478,10 @@ static uint32_t __no_inline_not_in_flash_func(endpoint_out_transaction)(pio_port
   return res;
 }
 
-static uint32_t __no_inline_not_in_flash_func(endpoint_setup_transaction)(
+static int __no_inline_not_in_flash_func(usb_setup_transaction)(
     pio_port_t *pp,  endpoint_t *ep) {
 
-  uint32_t res = 0;
+  int res = 0;
 
   // Setup token
   pio_usb_bus_prepare_receive(pp);
@@ -508,7 +494,7 @@ static uint32_t __no_inline_not_in_flash_func(endpoint_setup_transaction)(
 
   // Data
   ep->data_id = 0; // set to DATA0
-  pio_usb_bus_usb_transfer(pp, ep->bufptr, 12);
+  pio_usb_bus_usb_transfer(pp, ep->buffer, 12);
 
   // Handshake
   pio_usb_bus_start_receive(pp);
@@ -517,15 +503,96 @@ static uint32_t __no_inline_not_in_flash_func(endpoint_setup_transaction)(
   ep->actual_len = 8;
 
   if (pp->usb_rx_buffer[0] == USB_SYNC && pp->usb_rx_buffer[1] == USB_PID_ACK) {
-    res = PIO_USB_INTS_ENDPOINT_COMPLETE_BITS;
+    pio_usb_ll_transfer_complete(ep, PIO_USB_INTS_ENDPOINT_COMPLETE_BITS);
   }else{
-    res = PIO_USB_INTS_ENDPOINT_ERROR_BITS;
+    res = -1;
+    pio_usb_ll_transfer_complete(ep, PIO_USB_INTS_ENDPOINT_ERROR_BITS);
   }
 
   pp->usb_rx_buffer[1] = 0;  // reset buffer
 
   return res;
 }
+
+//--------------------------------------------------------------------+
+//
+//--------------------------------------------------------------------+
+#ifndef PIO_USB_USE_TINYUSB
+
+void __attribute__((weak)) __no_inline_not_in_flash_func(pio_usb_host_task)(void) {
+#if 0
+  for (int root_idx = 0; root_idx < PIO_USB_ROOT_PORT_CNT; root_idx++) {
+    if (root_port[root_idx].event == EVENT_CONNECT) {
+      printf("Root %d connected\n", root_idx);
+      int dev_idx = device_pool_vacant();
+      if (dev_idx >= 0) {
+        on_device_connect(&pio_port[0], &root_port[root_idx], dev_idx);
+        root_port[root_idx].addr0_exists = true;
+      }
+      root_port[root_idx].event = EVENT_NONE;
+    } else if (root_port[root_idx].event == EVENT_DISCONNECT) {
+      printf("Root %d disconnected\n", root_idx);
+      root_port[root_idx].root_device->connected = false;
+      root_port[root_idx].root_device->event = EVENT_DISCONNECT;
+      root_port[root_idx].root_device = NULL;
+      root_port[root_idx].event = EVENT_NONE;
+    }
+  }
+
+  for (int idx = 0; idx < PIO_USB_DEVICE_CNT; idx++) {
+    usb_device_t *device = &usb_device[idx];
+
+    if (device->event == EVENT_CONNECT) {
+      device->event = EVENT_NONE;
+      printf("Device %d Connected\n", idx);
+      int res = enumerate_device(device, idx + 1);
+      if (res == 0) {
+        device->enumerated = true;
+        device->root->addr0_exists = false;
+        if (device->device_class == CLASS_HUB) {
+          res = initialize_hub(device);
+        }
+      }
+
+      if (res != 0) {
+        printf("Enumeration failed(%d)\n", res);
+        // retry
+        if (device->is_root) {
+          device->root->event = EVENT_DISCONNECT;
+        } else {
+          set_hub_feature(device->parent_device, device->parent_port,
+                          HUB_SET_PORT_RESET);
+          device_disconnect(device);
+        }
+      }
+    } else if (device->event == EVENT_DISCONNECT) {
+      device->event = EVENT_NONE;
+      printf("Disconnect\n");
+      device_disconnect(device);
+    } else if (device->event == EVENT_HUB_PORT_CHANGE) {
+      process_hub_event(device);
+    }
+  }
+
+  if (cancel_timer_flag) {
+    int_stat = save_and_disable_interrupts();
+    stop_timer();
+    if (root_port->root_device != NULL) {
+      device_disconnect(root_port->root_device);
+    }
+    cancel_timer_flag = false;
+  }
+
+  if (start_timer_flag) {
+    start_timer(current_config.alarm_pool);
+    restore_interrupts(int_stat);
+    start_timer_flag = false;
+  }
+#endif
+
+}
+
+#endif
 
 #pragma GCC pop_options
 

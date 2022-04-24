@@ -29,7 +29,7 @@
 
 #define UNUSED_PARAMETER(x) (void)x
 
-/*static*/ usb_device_t usb_device[PIO_USB_DEVICE_CNT];
+/*static*/ usb_device_t pio_usb_device[PIO_USB_DEVICE_CNT];
 pio_port_t pio_port[1];
 root_port_t pio_usb_root_port[PIO_USB_ROOT_PORT_CNT];
 endpoint_t pio_usb_ep_pool[PIO_USB_EP_POOL_CNT];
@@ -198,10 +198,6 @@ int __no_inline_not_in_flash_func(pio_usb_bus_receive_packet_and_handshake)(pio_
   return -1;
 }
 
-//--------------------------------------------------------------------+
-//
-//--------------------------------------------------------------------+
-
 static __always_inline void add_pio_host_rx_program(PIO pio,
                                              const pio_program_t *program,
                                              const pio_program_t *debug_program,
@@ -285,7 +281,49 @@ void pio_usb_bus_init(pio_port_t *pp, const pio_usb_configuration_t *c, root_por
   root->dev_addr = 0;
 }
 
-void pio_usb_ll_endpoint_configure(endpoint_t * ep, uint8_t const* desc_endpoint)
+//--------------------------------------------------------------------+
+//
+//--------------------------------------------------------------------+
+
+endpoint_t *pio_usb_get_endpoint(usb_device_t *device, uint8_t idx) {
+  uint8_t ep_id = device->endpoint_id[idx];
+  if (ep_id == 0) {
+    return NULL;
+  } else if (ep_id >= 1) {
+    return &pio_usb_ep_pool[ep_id - 1];
+  }
+  return NULL;
+}
+
+int __no_inline_not_in_flash_func(pio_usb_get_in_data)(endpoint_t *ep,
+                                                       uint8_t *buffer,
+                                                       uint8_t len) {
+//  if ((ep->ep_num & EP_IN) && ep->new_data_flag) {
+//    len = len < ep->packet_len ? len : ep->packet_len;
+//    memcpy(buffer, (void *)ep->buffer, len);
+//
+//    ep->new_data_flag = false;
+//
+//    return len;
+//  }
+
+  return -1;
+}
+
+int __no_inline_not_in_flash_func(pio_usb_set_out_data)(endpoint_t *ep,
+                                                          const uint8_t *buffer,
+                                                          uint8_t len) {
+  if (ep->has_transfer || (ep->ep_num & EP_IN)) {
+    return -1;
+  }
+
+  pio_usb_ll_transfer_start(ep, (uint8_t*) buffer, len);
+
+  return 0;
+}
+
+
+void __no_inline_not_in_flash_func(pio_usb_ll_configure_endpoint)(endpoint_t * ep, uint8_t const* desc_endpoint)
 {
   const endpoint_descriptor_t *d = (const endpoint_descriptor_t *) desc_endpoint;
 
@@ -296,28 +334,29 @@ void pio_usb_ll_endpoint_configure(endpoint_t * ep, uint8_t const* desc_endpoint
   ep->data_id          = 0;
 }
 
-bool pio_usb_ll_endpoint_transfer(endpoint_t * ep, uint8_t* buffer, uint16_t buflen)
+static inline __force_inline uint16_t prepare_tx_data(endpoint_t * ep) {
+  uint16_t const xact_len = pio_usb_ll_get_transaction_len(ep);
+  ep->buffer[0] = USB_SYNC;
+  ep->buffer[1] = (ep->data_id == 1) ? USB_PID_DATA1 : USB_PID_DATA0; // USB_PID_SETUP also DATA0
+  memcpy(ep->buffer+2, ep->app_buf, xact_len);
+
+  uint16_t const crc16 = calc_usb_crc16(ep->app_buf, xact_len);
+  ep->buffer[2+xact_len] = crc16 & 0xff;
+  ep->buffer[2+xact_len+1] = crc16 >> 8;
+
+  ep->packet_len = xact_len + 4;
+}
+
+bool __no_inline_not_in_flash_func(pio_usb_ll_transfer_start)(endpoint_t * ep, uint8_t* buffer, uint16_t buflen)
 {
+  // check if ep->has_transfer is already true (a race condition)
+
+  ep->app_buf = buffer;
   ep->total_len = buflen;
   ep->actual_len = 0;
 
-  if (!ep->is_tx) {
-    ep->bufptr = buffer;
-  }else
-  {
-    // TODO use larger allocation e.g dual packet to improve throughput for BULK
-    ep->bufptr = ep->buffer;
-
-    uint16_t const xact_len = MIN(buflen, ep->size);
-    ep->buffer[0] = USB_SYNC;
-    ep->buffer[1] = (ep->data_id == 1) ? USB_PID_DATA1 : USB_PID_DATA0;
-    memcpy(ep->buffer+2, buffer, xact_len);
-
-    uint16_t const crc16 = calc_usb_crc16(buffer, xact_len);
-    ep->buffer[2+xact_len] = crc16 & 0xff;
-    ep->buffer[2+xact_len+1] = crc16 >> 8;
-
-    ep->packet_len = xact_len + 4;
+  if (ep->is_tx) {
+    prepare_tx_data(ep);
   }
 
   ep->has_transfer = true;
@@ -325,53 +364,43 @@ bool pio_usb_ll_endpoint_transfer(endpoint_t * ep, uint8_t* buffer, uint16_t buf
   return true;
 }
 
-#if 0
-endpoint_t *pio_usb_get_endpoint(usb_device_t *device, uint8_t idx) {
-  uint8_t ep_id = device->endpoint_id[idx];
-  if (ep_id == 0) {
-    return NULL;
-  } else if (ep_id >= 1) {
-    return &ep_pool[ep_id - 1];
+bool __no_inline_not_in_flash_func(pio_usb_ll_transfer_continue)(endpoint_t * ep, uint16_t xferred_bytes)
+{
+  ep->app_buf += xferred_bytes;
+  ep->actual_len += xferred_bytes;
+  ep->data_id ^= 1;
+
+  if ( (xferred_bytes < ep->size) || (ep->actual_len >= ep->total_len) ) {
+    // complete if all bytes transferred or short packet
+    pio_usb_ll_transfer_complete(ep, PIO_USB_INTS_ENDPOINT_COMPLETE_BITS);
+    return false;
+  }else {
+    if (ep->is_tx) {
+      prepare_tx_data(ep);
+    }
+
+    return true;
   }
-  return NULL;
 }
 
-int __no_inline_not_in_flash_func(pio_usb_get_in_data)(endpoint_t *ep,
-                                                       uint8_t *buffer,
-                                                       uint8_t len) {
-  if ((ep->ep_num & EP_IN) && ep->new_data_flag) {
-    len = len < ep->packet_len ? len : ep->packet_len;
-    memcpy(buffer, (void *)ep->buffer, len);
+void __no_inline_not_in_flash_func(pio_usb_ll_transfer_complete)(endpoint_t * ep, uint32_t flag) {
+  root_port_t *rport = PIO_USB_ROOT_PORT(ep->root_idx);
+  uint32_t const ep_mask = (1u << (ep-pio_usb_ep_pool));
 
-    ep->new_data_flag = false;
+  rport->ints |= flag;
 
-    return len;
+  if (flag == PIO_USB_INTS_ENDPOINT_COMPLETE_BITS) {
+    rport->ep_complete |= ep_mask;
+  }else if (flag == PIO_USB_INTS_ENDPOINT_ERROR_BITS) {
+    rport->ep_error |= ep_mask;
+  }else if (flag == PIO_USB_INTS_ENDPOINT_STALLED_BITS) {
+    rport->ep_stalled |= ep_mask;
+  }else {
+    // something wrong
   }
 
-  return -1;
+  ep->has_transfer = false;
 }
-
-int __no_inline_not_in_flash_func(pio_usb_set_out_data)(endpoint_t *ep,
-                                                          const uint8_t *buffer,
-                                                          uint8_t len) {
-  if (ep->new_data_flag || (ep->ep_num & EP_IN)) {
-    return -1;
-  }
-
-  ep->buffer[0] = USB_SYNC;
-  ep->buffer[1] = ep->data_id == 0 ? USB_PID_DATA0 : USB_PID_DATA1;
-  memcpy((uint8_t *)&ep->buffer[2], buffer, len);
-  uint16_t crc = calc_usb_crc16(buffer, len);
-  ep->buffer[2 + len] = crc & 0xff;
-  ep->buffer[2 + len + 1] = (crc >> 8) & 0xff;
-  ep->packet_len = len + 4;
-
-  ep->new_data_flag = true;
-
-  return 0;
-}
-#endif
-
 
 int pio_usb_host_add_port(uint8_t pin_dp) {
   for (int idx = 0; idx < PIO_USB_ROOT_PORT_CNT; idx++) {

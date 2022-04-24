@@ -67,7 +67,7 @@ typedef struct {
 
   volatile bool stalled;
   volatile bool has_transfer;
-  uint8_t* bufptr;
+  uint8_t* app_buf;
   uint16_t total_len;
   uint16_t actual_len;
 
@@ -170,8 +170,8 @@ enum {
 };
 
 typedef struct {
-  uint8_t sync;
-  uint8_t pid;
+//  uint8_t sync;
+//  uint8_t pid;
   uint8_t request_type;
   uint8_t request;
   uint8_t value_lsb;
@@ -180,7 +180,7 @@ typedef struct {
   uint8_t index_msb;
   uint8_t length_lsb;
   uint8_t length_msb;
-  uint8_t crc16[2];
+//  uint8_t crc16[2];
 } usb_setup_packet_t;
 
 typedef struct {
