@@ -169,6 +169,8 @@ bool pio_usb_device_endpoint_transfer(uint8_t root_idx, uint8_t ep_address, uint
 
 static inline __force_inline endpoint_t* pio_usb_device_get_endpoint_by_address(uint8_t root_idx, uint8_t ep_address)
 {
+  (void) root_idx;
+
   // index = 2*num + dir e.g out1, in1, out2, in2
   uint8_t const ep_idx =  ((ep_address & 0x7f) << 1) | (ep_address >> 7);
   return PIO_USB_ENDPOINT(ep_idx);

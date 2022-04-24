@@ -292,17 +292,28 @@ static uint8_t ep0_desc_request_idx;
 
 static void __no_inline_not_in_flash_func(prepare_ep0_data)(uint8_t *data,
                                                               uint8_t len) {
-  usb_device_t *dev = &pio_usb_device[0];
-  control_pipe_t *p = &dev->control_pipe;
-  endpoint_t *ep = &pio_usb_ep_pool[1]; // 0: control out, 1 : control in
+  // 0: control out (rx), 1 : control in (tx)
+  endpoint_t *ep = &pio_usb_ep_pool[1];
 
-  p->request_length = len;
-  p->rx_buffer = data;
-  p->buffer_idx = 0;
+  pio_usb_ll_transfer_start(ep, data, len);
 
-  uint8_t packet_len =
-      p->request_length > PIO_USB_EP_SIZE ? PIO_USB_EP_SIZE : p->request_length;
-  pio_usb_ll_transfer_start(ep, (uint8_t *) (uintptr_t) &p->rx_buffer[p->buffer_idx], packet_len);
+  if (len) {
+    // there is data, prepare for status as well
+    pio_usb_ll_transfer_start(&pio_usb_ep_pool[0], NULL, 0);
+  }
+}
+
+static void __no_inline_not_in_flash_func(prepare_ep0_rx)(uint8_t *data,
+                                                              uint8_t len) {
+  // 0: control out (rx), 1 : control in (tx)
+  endpoint_t *ep = &pio_usb_ep_pool[0];
+
+  pio_usb_ll_transfer_start(ep, data, len);
+
+  if (len) {
+    // there is data, prepare for status as well
+    pio_usb_ll_transfer_start(&pio_usb_ep_pool[1], NULL, 0);
+  }
 }
 
 void pio_usb_device_task(void) {
@@ -376,7 +387,8 @@ static int __no_inline_not_in_flash_func(process_device_setup_stage)(
   } else if (packet->request_type == (USB_REQ_TYP_CLASS | USB_REQ_REC_IFACE)) {
     if (packet->request == 0x09) {
       // set hid report
-      prepare_ep0_data(NULL, 0);
+      static __unused uint8_t received_hid_report[8]; // not used
+      prepare_ep0_data(received_hid_report, 8);
       res = 0;
     } else if (packet->request == 0x0A) {
       // set hid idle request
@@ -392,7 +404,6 @@ static int __no_inline_not_in_flash_func(process_device_setup_stage)(
   return res;
 }
 
-#if 0
 void __attribute__((weak)) __no_inline_not_in_flash_func(pio_usb_device_irq_handler)(uint8_t root_idx) {
   root_port_t* root = PIO_USB_ROOT_PORT(root_idx);
   usb_device_t *dev = &pio_usb_device[0];
@@ -427,7 +438,9 @@ void __attribute__((weak)) __no_inline_not_in_flash_func(pio_usb_device_irq_hand
 
     // control in
     if ( ep_all & 0x02 ) {
-
+      if (dev->control_pipe.stage == STAGE_STATUS) {
+        dev->control_pipe.stage = STAGE_COMPLETE;
+      }
     }
 
 //    for(uint8_t ep_idx = 0; ep_idx < PIO_USB_EP_POOL_CNT; ep_idx++)
@@ -448,7 +461,6 @@ void __attribute__((weak)) __no_inline_not_in_flash_func(pio_usb_device_irq_hand
   // clear all
   root->ints &= ~ints;
 }
-#endif
 
 #pragma GCC pop_options
 
