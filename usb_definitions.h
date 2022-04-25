@@ -83,26 +83,18 @@ typedef enum {
 } usb_device_event_t;
 
 typedef struct struct_usb_device_t usb_device_t;
-//typedef struct struct_root_port_t {
-//  volatile bool initialized;
-//  volatile bool addr0_exists;
-//  volatile bool is_fullspeed;
-//  volatile uint pin_dp;
-//  volatile uint pin_dm;
-//  volatile usb_device_event_t event;
-//  usb_device_t *root_device;
-//} root_port_t;
-
 typedef struct {
   volatile bool initialized;
+  volatile bool addr0_exists;
   volatile bool is_fullspeed;
-  volatile bool connected;
-  volatile bool suspended;
-
-  uint8_t mode;
-
   volatile uint pin_dp;
   volatile uint pin_dm;
+  volatile usb_device_event_t event;
+  usb_device_t *root_device;
+
+  volatile bool connected;
+  volatile bool suspended;
+  uint8_t mode;
 
   // register interface
   volatile uint32_t ints; // interrupt status
@@ -304,75 +296,51 @@ enum {
   USB_REQ_REC_OTHER = 0x03,
 };
 
-#define GET_DEVICE_DESCRIPTOR_REQ_DEFAULT                                    \
-  {                                                                          \
-    USB_SYNC, USB_PID_DATA0, USB_REQ_DIR_IN, 0x06, 0, 0x01, 0, 0, 0x12, 0, { \
-      USB_CRC16_PLACE, USB_CRC16_PLACE                                       \
-    }                                                                        \
+#define GET_DEVICE_DESCRIPTOR_REQ_DEFAULT                                  \
+  {                                                                        \
+    USB_REQ_DIR_IN, 0x06, 0, 0x01, 0, 0, 0x12, 0                           \
   }
-#define GET_CONFIGURATION_DESCRIPTOR_REQ_DEFAULT                             \
-  {                                                                          \
-    USB_SYNC, USB_PID_DATA0, USB_REQ_DIR_IN, 0x06, 0, 0x02, 0, 0, 0x09, 0, { \
-      USB_CRC16_PLACE, USB_CRC16_PLACE                                       \
-    }                                                                        \
+#define GET_CONFIGURATION_DESCRIPTOR_REQ_DEFAULT                           \
+  {                                                                        \
+    USB_REQ_DIR_IN, 0x06, 0, 0x02, 0, 0, 0x09, 0                           \
   }
-#define SET_CONFIGURATION_REQ_DEFAULT                                   \
-  {                                                                     \
-    USB_SYNC, USB_PID_DATA0, USB_REQ_DIR_OUT, 0x09, 0, 0, 0, 0, 0, 0, { \
-      USB_CRC16_PLACE, USB_CRC16_PLACE                                  \
-    }                                                                   \
+#define SET_CONFIGURATION_REQ_DEFAULT                                      \
+  {                                                                        \
+    USB_REQ_DIR_OUT, 0x09, 0, 0, 0, 0, 0, 0                                \
   }
-#define SET_ADDRESS_REQ_DEFAULT                                           \
-  {                                                                       \
-    USB_SYNC, USB_PID_DATA0, USB_REQ_DIR_OUT, 0x5, 0x02, 0, 0, 0, 0, 0, { \
-      USB_CRC16_PLACE, USB_CRC16_PLACE                                    \
-    }                                                                     \
+#define SET_ADDRESS_REQ_DEFAULT                                            \
+  {                                                                        \
+    USB_REQ_DIR_OUT, 0x5, 0x02, 0, 0, 0, 0, 0                              \
   }
-#define SET_HID_IDLE_REQ_DEFAULT                                             \
-  {                                                                          \
-    USB_SYNC, USB_PID_DATA0, USB_REQ_TYP_CLASS | USB_REQ_REC_IFACE, 0x0A, 0, \
-        0, 0, 0, 0, 0, {                                                     \
-      USB_CRC16_PLACE, USB_CRC16_PLACE                                       \
-    }                                                                        \
+#define SET_HID_IDLE_REQ_DEFAULT                                           \
+  {                                                                        \
+    USB_REQ_TYP_CLASS | USB_REQ_REC_IFACE, 0x0A, 0,                        \
+        0, 0, 0, 0, 0                                                      \
   }
-#define GET_HID_REPORT_DESCRIPTOR_DEFAULT                                 \
-  {                                                                       \
-    USB_SYNC, USB_PID_DATA0, USB_REQ_DIR_IN | USB_REQ_REC_IFACE, 0x06, 0, \
-        0x22, 0, 0, 0xff, 0, {                                            \
-      USB_CRC16_PLACE, USB_CRC16_PLACE                                    \
-    }                                                                     \
+#define GET_HID_REPORT_DESCRIPTOR_DEFAULT                                  \
+  {                                                                        \
+    USB_REQ_DIR_IN | USB_REQ_REC_IFACE, 0x06, 0,                           \
+        0x22, 0, 0, 0xff, 0                                                \
   }
-#define GET_HUB_DESCRPTOR_REQUEST                                         \
-  {                                                                       \
-    USB_SYNC, USB_PID_DATA0,                                              \
-        USB_REQ_DIR_IN | USB_REQ_TYP_CLASS | USB_REQ_REC_DEVICE, 0x06, 0, \
-        0x29, 0, 0, 8, 0, {                                              \
-      USB_CRC16_PLACE, USB_CRC16_PLACE                                    \
-    }                                                                     \
+#define GET_HUB_DESCRPTOR_REQUEST                                          \
+  {                                                                        \
+    USB_REQ_DIR_IN | USB_REQ_TYP_CLASS | USB_REQ_REC_DEVICE, 0x06, 0,      \
+        0x29, 0, 0, 8, 0                                                   \
   }
-#define GET_HUB_PORT_STATUS_REQUEST                                                 \
-  {                                                                            \
-    USB_SYNC, USB_PID_DATA0,                                                   \
-        USB_REQ_DIR_IN | USB_REQ_TYP_CLASS | USB_REQ_REC_OTHER, 0, 0, 0, 0, 0, \
-        4, 0, {                                                                \
-      USB_CRC16_PLACE, USB_CRC16_PLACE                                         \
-    }                                                                          \
+#define GET_HUB_PORT_STATUS_REQUEST                                        \
+  {                                                                        \
+    USB_REQ_DIR_IN | USB_REQ_TYP_CLASS | USB_REQ_REC_OTHER, 0, 0, 0, 0, 0, \
+        4, 0                                                               \
   }
-#define SET_HUB_FEATURE_REQUEST                                              \
-  {                                                                          \
-    USB_SYNC, USB_PID_DATA0,                                                 \
-        USB_REQ_DIR_OUT | USB_REQ_TYP_CLASS | USB_REQ_REC_OTHER, 0x03, 0, 0, \
-        0, 0, 0, 0, {                                                        \
-      USB_CRC16_PLACE, USB_CRC16_PLACE                                       \
-    }                                                                        \
+#define SET_HUB_FEATURE_REQUEST                                            \
+  {                                                                        \
+    USB_REQ_DIR_OUT | USB_REQ_TYP_CLASS | USB_REQ_REC_OTHER, 0x03, 0, 0,   \
+        0, 0, 0, 0                                                         \
   }
-#define CLEAR_HUB_FEATURE_REQUEST                                            \
-  {                                                                          \
-    USB_SYNC, USB_PID_DATA0,                                                 \
-        USB_REQ_DIR_OUT | USB_REQ_TYP_CLASS | USB_REQ_REC_OTHER, 0x01, 0, 0, \
-        0, 0, 0, 0, {                                                        \
-      USB_CRC16_PLACE, USB_CRC16_PLACE                                       \
-    }                                                                        \
+#define CLEAR_HUB_FEATURE_REQUEST                                          \
+  {                                                                        \
+    USB_REQ_DIR_OUT | USB_REQ_TYP_CLASS | USB_REQ_REC_OTHER, 0x01, 0, 0,   \
+        0, 0, 0, 0                                                         \
   }
 
 typedef struct {
