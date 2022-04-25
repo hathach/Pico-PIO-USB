@@ -355,21 +355,32 @@ static inline __force_inline endpoint_t* _find_ep(uint8_t root_idx, uint8_t devi
 
 bool pio_usb_host_endpoint_open(uint8_t root_idx, uint8_t device_address, uint8_t const* desc_endpoint, bool need_pre) {
   const endpoint_descriptor_t *d = (const endpoint_descriptor_t *) desc_endpoint;
+  endpoint_t *ep = NULL;
 
-  for (int ep_pool_idx = 0; ep_pool_idx < PIO_USB_EP_POOL_CNT; ep_pool_idx++) {
-    endpoint_t *ep = PIO_USB_ENDPOINT(ep_pool_idx);
-    // ep size is used as valid indicator
-    if (PIO_USB_ENDPOINT(ep_pool_idx)->size == 0) {
-      pio_usb_ll_configure_endpoint(ep, desc_endpoint);
-      ep->root_idx = root_idx;
-      ep->dev_addr = device_address;
-      ep->need_pre = need_pre;
-      ep->is_tx = (d->epaddr & 0x80) ? false : true; // host endpoint out is tx
-      return true;
+  if (device_address == 0) {
+    // dedicate first endpoint for address0
+    ep = PIO_USB_ENDPOINT(0);
+  }else {
+    for (int ep_pool_idx = 1; ep_pool_idx < PIO_USB_EP_POOL_CNT; ep_pool_idx++) {
+      // ep size is used as valid indicator
+      if (PIO_USB_ENDPOINT(ep_pool_idx)->size == 0) {
+        ep = PIO_USB_ENDPOINT(ep_pool_idx);
+        break;
+      }
     }
   }
 
-  return false;
+  if (ep == NULL) {
+    return false;
+  }
+
+  pio_usb_ll_configure_endpoint(ep, desc_endpoint);
+  ep->root_idx = root_idx;
+  ep->dev_addr = device_address;
+  ep->need_pre = need_pre;
+  ep->is_tx = (d->epaddr & 0x80) ? false : true; // host endpoint out is tx
+
+  return true;
 }
 
 bool pio_usb_host_send_setup(uint8_t root_idx, uint8_t device_address, uint8_t const setup_packet[8]) {
@@ -382,8 +393,6 @@ bool pio_usb_host_send_setup(uint8_t root_idx, uint8_t device_address, uint8_t c
   ep->ep_num = 0; // setup is is OUT
   ep->data_id = USB_PID_SETUP;
   ep->is_tx = true;
-
-  printf("send setup\r\n");
 
   pio_usb_ll_transfer_start(ep, (uint8_t*) setup_packet, 8);
 
@@ -794,6 +803,11 @@ static int enumerate_device(usb_device_t *device, uint8_t address) {
     return res;
   }
   device->address = address;
+
+  endpoint_descriptor_t ep0_desc = {
+    sizeof(endpoint_descriptor_t), DESC_TYPE_ENDPOINT, 0x00, 0x00, { desc->max_packet_size, 0x00 }, 0x00
+  };
+  pio_usb_host_endpoint_open(device->root-pio_usb_root_port, address, (uint8_t const*) &ep0_desc, false);
 
   uint8_t str[64];
   if (idx_manufacture != 0) {
