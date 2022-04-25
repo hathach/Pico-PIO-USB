@@ -163,14 +163,12 @@ bool pio_usb_host_endpoint_transfer(uint8_t root_idx, uint8_t device_address, ui
 // Device IRQ Handler
 __attribute__((weak)) void pio_usb_device_irq_handler(uint8_t root_idx);
 
-void pio_usb_device_set_address(uint8_t root_idx, uint8_t dev_addr);
-bool pio_usb_device_endpoint_open(uint8_t root_idx, uint8_t const *desc_endpoint);
-bool pio_usb_device_endpoint_transfer(uint8_t root_idx, uint8_t ep_address, uint8_t* buffer, uint16_t buflen);
+void pio_usb_device_set_address(uint8_t dev_addr);
+bool pio_usb_device_endpoint_open(uint8_t const *desc_endpoint);
+bool pio_usb_device_transfer(uint8_t ep_address, uint8_t* buffer, uint16_t buflen);
 
-static inline __force_inline endpoint_t* pio_usb_device_get_endpoint_by_address(uint8_t root_idx, uint8_t ep_address)
+static inline __force_inline endpoint_t* pio_usb_device_get_endpoint_by_address(uint8_t ep_address)
 {
-  (void) root_idx;
-
   // index = 2*num + dir e.g out1, in1, out2, in2
   uint8_t const ep_idx =  ((ep_address & 0x7f) << 1) | (ep_address >> 7);
   return PIO_USB_ENDPOINT(ep_idx);

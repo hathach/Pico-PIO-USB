@@ -313,7 +313,7 @@ int __no_inline_not_in_flash_func(pio_usb_get_in_data)(endpoint_t *ep,
 int __no_inline_not_in_flash_func(pio_usb_set_out_data)(endpoint_t *ep,
                                                           const uint8_t *buffer,
                                                           uint8_t len) {
-  if (ep->has_transfer || (ep->ep_num & EP_IN)) {
+  if (ep->has_transfer) {
     return -1;
   }
 
@@ -349,7 +349,9 @@ static inline __force_inline uint16_t prepare_tx_data(endpoint_t * ep) {
 
 bool __no_inline_not_in_flash_func(pio_usb_ll_transfer_start)(endpoint_t * ep, uint8_t* buffer, uint16_t buflen)
 {
-  // check if ep->has_transfer is already true (a race condition)
+  if ( !ep->size ) {
+    return false;
+  }
 
   ep->app_buf = buffer;
   ep->total_len = buflen;
