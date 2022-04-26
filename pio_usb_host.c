@@ -1252,6 +1252,10 @@ static void __no_inline_not_in_flash_func(handle_endpoint_irq)(root_port_t* root
             }
           }
         }
+        else if (device->device_class == CLASS_HUB && (ep->ep_num & EP_IN) ) {
+          // hub interrupt endpoint
+          device->event = EVENT_HUB_PORT_CHANGE;
+        }
       }
     }
   }
