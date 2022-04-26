@@ -1126,6 +1126,7 @@ void __no_inline_not_in_flash_func(pio_usb_host_task)(void) {
       pio_usb_root_port[root_idx].event = EVENT_NONE;
     } else if (pio_usb_root_port[root_idx].event == EVENT_DISCONNECT) {
       printf("Root %d disconnected\n", root_idx);
+      pio_usb_host_close_device(root_idx, pio_usb_root_port[root_idx].root_device->address);
       pio_usb_root_port[root_idx].root_device->connected = false;
       pio_usb_root_port[root_idx].root_device->event = EVENT_DISCONNECT;
       pio_usb_root_port[root_idx].root_device = NULL;
