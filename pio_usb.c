@@ -298,14 +298,20 @@ endpoint_t *pio_usb_get_endpoint(usb_device_t *device, uint8_t idx) {
 int __no_inline_not_in_flash_func(pio_usb_get_in_data)(endpoint_t *ep,
                                                        uint8_t *buffer,
                                                        uint8_t len) {
-//  if ((ep->ep_num & EP_IN) && ep->new_data_flag) {
-//    len = len < ep->packet_len ? len : ep->packet_len;
-//    memcpy(buffer, (void *)ep->buffer, len);
-//
-//    ep->new_data_flag = false;
-//
-//    return len;
-//  }
+  if (ep->has_transfer || ep->is_tx) {
+    return -1;
+  }
+
+  if (ep->new_data_flag) {
+    len = len < ep->actual_len ? len : ep->actual_len;
+    memcpy(buffer, (void *)ep->buffer, len);
+
+    ep->new_data_flag = false;
+
+    pio_usb_ll_transfer_start(ep, ep->buffer, ep->size);
+
+    return len;
+  }
 
   return -1;
 }
@@ -313,7 +319,7 @@ int __no_inline_not_in_flash_func(pio_usb_get_in_data)(endpoint_t *ep,
 int __no_inline_not_in_flash_func(pio_usb_set_out_data)(endpoint_t *ep,
                                                           const uint8_t *buffer,
                                                           uint8_t len) {
-  if (ep->has_transfer) {
+  if (ep->has_transfer || !ep->is_tx) {
     return -1;
   }
 
@@ -343,22 +349,18 @@ static inline __force_inline uint16_t prepare_tx_data(endpoint_t * ep) {
   uint16_t const crc16 = calc_usb_crc16(ep->app_buf, xact_len);
   ep->buffer[2+xact_len] = crc16 & 0xff;
   ep->buffer[2+xact_len+1] = crc16 >> 8;
-
-  ep->packet_len = xact_len + 4;
 }
 
 bool __no_inline_not_in_flash_func(pio_usb_ll_transfer_start)(endpoint_t * ep, uint8_t* buffer, uint16_t buflen)
 {
-  if ( !ep->size ) {
-    return false;
-  }
-
   ep->app_buf = buffer;
   ep->total_len = buflen;
   ep->actual_len = 0;
 
   if (ep->is_tx) {
     prepare_tx_data(ep);
+  }else {
+    ep->new_data_flag = false;
   }
 
   ep->has_transfer = true;
@@ -393,6 +395,9 @@ void __no_inline_not_in_flash_func(pio_usb_ll_transfer_complete)(endpoint_t * ep
 
   if (flag == PIO_USB_INTS_ENDPOINT_COMPLETE_BITS) {
     rport->ep_complete |= ep_mask;
+    if (!ep->is_tx) {
+      ep->new_data_flag = true;
+    }
   }else if (flag == PIO_USB_INTS_ENDPOINT_ERROR_BITS) {
     rport->ep_error |= ep_mask;
   }else if (flag == PIO_USB_INTS_ENDPOINT_STALLED_BITS) {

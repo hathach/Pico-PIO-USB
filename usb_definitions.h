@@ -56,7 +56,7 @@ typedef struct {
   volatile uint8_t root_idx;
   volatile uint8_t dev_addr;
            bool    need_pre;
-           bool    is_tx;
+           bool    is_tx; // Host out or Device in
 
   volatile uint8_t ep_num;
   volatile uint16_t size;
@@ -67,12 +67,13 @@ typedef struct {
 
   volatile bool stalled;
   volatile bool has_transfer;
+  volatile bool new_data_flag;
+
   uint8_t* app_buf;
   uint16_t total_len;
   uint16_t actual_len;
 
   uint8_t buffer[64 + 4];
-  uint8_t packet_len;
 } endpoint_t;
 
 typedef enum {

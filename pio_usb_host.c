@@ -935,6 +935,11 @@ static int enumerate_device(usb_device_t *device, uint8_t address) {
             ep->size = d->max_size[0] | (d->max_size[1] << 8);
             ep->attr = d->attr | EP_ATTR_ENUMERATING;
             ep->ep_num = d->epaddr;
+
+            ep->root_idx = device->root - pio_usb_root_port;
+            ep->dev_addr = device->address;
+            ep->need_pre = false;
+            ep->is_tx = (d->epaddr & 0x80) ? false : true;
           } else {
             printf("No empty EP\n");
           }
@@ -988,6 +993,11 @@ static int enumerate_device(usb_device_t *device, uint8_t address) {
       break;
     }
     ep->attr &= ~EP_ATTR_ENUMERATING;
+
+    // prepare transfer
+    if ( ep->ep_num & EP_IN ) {
+      pio_usb_ll_transfer_start(ep, ep->buffer, ep->size);
+    }
   }
 
   return res;
