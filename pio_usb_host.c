@@ -584,7 +584,6 @@ static void on_device_connect(pio_port_t *pp, root_port_t *root,
   endpoint_descriptor_t ep0_desc = {
     sizeof(endpoint_descriptor_t), DESC_TYPE_ENDPOINT, 0x00, 0x00, { 0x08, 0x00 }, 0x00
   };
-
   pio_usb_host_endpoint_open(root-pio_usb_root_port, 0x00, (uint8_t const*) &ep0_desc, false);
 }
 
@@ -807,7 +806,7 @@ static int enumerate_device(usb_device_t *device, uint8_t address) {
   endpoint_descriptor_t ep0_desc = {
     sizeof(endpoint_descriptor_t), DESC_TYPE_ENDPOINT, 0x00, 0x00, { desc->max_packet_size, 0x00 }, 0x00
   };
-  pio_usb_host_endpoint_open(device->root-pio_usb_root_port, address, (uint8_t const*) &ep0_desc, false);
+  pio_usb_host_endpoint_open(device->root-pio_usb_root_port, address, (uint8_t const*) &ep0_desc, !device->is_root && !device->is_fullspeed);
 
   uint8_t str[64];
   if (idx_manufacture != 0) {
@@ -938,7 +937,7 @@ static int enumerate_device(usb_device_t *device, uint8_t address) {
 
             ep->root_idx = device->root - pio_usb_root_port;
             ep->dev_addr = device->address;
-            ep->need_pre = false;
+            ep->need_pre = !device->is_root && !device->is_fullspeed;
             ep->is_tx = (d->epaddr & 0x80) ? false : true;
           } else {
             printf("No empty EP\n");
@@ -1047,6 +1046,12 @@ static int assign_new_device_to_port(usb_device_t *hub_device, uint8_t port, boo
     pio_usb_device[idx].is_fullspeed = !is_ls;
     pio_usb_device[idx].event = EVENT_CONNECT;
     printf("Assign device %d to %d-%d\n", idx, hub_device->address, port);
+
+    endpoint_descriptor_t ep0_desc = {
+      sizeof(endpoint_descriptor_t), DESC_TYPE_ENDPOINT, 0x00, 0x00, { 0x08, 0x00 }, 0x00
+    };
+    pio_usb_host_endpoint_open(hub_device->root-pio_usb_root_port, 0x00, (uint8_t const*) &ep0_desc, is_ls);
+
     return 0;
   }
 
