@@ -917,7 +917,7 @@ static int enumerate_device(usb_device_t *device, uint8_t address) {
           volatile endpoint_t *ep = NULL;
           for (int ep_pool_idx = 0; ep_pool_idx < PIO_USB_EP_POOL_CNT;
                ep_pool_idx++) {
-            if (pio_usb_ep_pool[ep_pool_idx].ep_num == 0) {
+            if (pio_usb_ep_pool[ep_pool_idx].size == 0) {
               ep = &pio_usb_ep_pool[ep_pool_idx];
               device->endpoint_id[ep_id_idx] = ep_pool_idx + 1;
               ep_id_idx++;
