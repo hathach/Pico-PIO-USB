@@ -100,29 +100,35 @@ static void __no_inline_not_in_flash_func(usb_device_packet_handler)(void) {
     if (ep_num < 0) {
       return;
     }
-    bool wait_ack;
+    static uint8_t hand_shake_token[2] = { USB_SYNC, USB_PID_STALL };
+
     endpoint_t* ep = PIO_USB_ENDPOINT((ep_num << 1) | 0x01);
     uint16_t const xact_len = pio_usb_ll_get_transaction_len(ep);
 
     pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_rx, false);
 
     if (ep->has_transfer) {
-      pio_usb_bus_usb_transfer(pp, ep->buffer, xact_len+4);
-      wait_ack = true;
+      dma_channel_transfer_from_buffer_now(pp->tx_ch, ep->buffer, xact_len+4);
     }else if (ep->stalled) {
-      pio_usb_bus_send_handshake(pp, USB_PID_STALL);
-      wait_ack = false;
+      hand_shake_token[1] = USB_PID_STALL;
+      dma_channel_transfer_from_buffer_now(pp->tx_ch, hand_shake_token, 2);
     } else {
-      pio_usb_bus_send_handshake(pp, USB_PID_NAK);
-      wait_ack = false;
+      hand_shake_token[1] = USB_PID_NAK;
+      dma_channel_transfer_from_buffer_now(pp->tx_ch, hand_shake_token, 2);
     }
 
-    if (wait_ack) {
+    pp->pio_usb_tx->irq |= IRQ_TX_ALL_MASK;  // clear complete flag
+    while ((pp->pio_usb_tx->irq & IRQ_TX_ALL_MASK) == 0) {
+      continue;
+    }
+
+    if (ep->has_transfer) {
       pp->pio_usb_rx->irq = IRQ_RX_ALL_MASK;
       irq_clear(pp->device_rx_irq_num);
       pio_usb_bus_start_receive(pp);
-      pio_usb_bus_wait_handshake(pp);
 
+      // wait for ack
+      pio_usb_bus_wait_handshake(pp);
 
       pp->pio_usb_rx->irq = IRQ_RX_ALL_MASK;
       irq_clear(pp->device_rx_irq_num);
