@@ -60,6 +60,8 @@ typedef struct {
 
   volatile uint8_t ep_num;
   volatile uint16_t size;
+  uint8_t buffer[64 + 4];
+  volatile bool new_data_flag;
   volatile uint8_t attr;
   volatile uint8_t interval;
   volatile uint8_t interval_counter;
@@ -67,13 +69,9 @@ typedef struct {
 
   volatile bool stalled;
   volatile bool has_transfer;
-  volatile bool new_data_flag;
-
   uint8_t* app_buf;
   uint16_t total_len;
   uint16_t actual_len;
-
-  uint8_t buffer[64 + 4];
 } endpoint_t;
 
 typedef enum {
@@ -84,15 +82,15 @@ typedef enum {
 } usb_device_event_t;
 
 typedef struct struct_usb_device_t usb_device_t;
-typedef struct {
+typedef struct struct_root_port_t {
   volatile bool initialized;
   volatile bool addr0_exists;
-  volatile bool is_fullspeed;
   volatile uint pin_dp;
   volatile uint pin_dm;
   volatile usb_device_event_t event;
   usb_device_t *root_device;
 
+  volatile bool is_fullspeed;
   volatile bool connected;
   volatile bool suspended;
   uint8_t mode;

@@ -141,7 +141,7 @@ static inline __force_inline uint16_t pio_usb_ll_get_transaction_len(endpoint_t 
 }
 
 //--------------------------------------------------------------------
-// Host functions
+// Host Controller functions
 //--------------------------------------------------------------------
 
 // Host IRQ Handler
@@ -157,7 +157,7 @@ bool pio_usb_host_send_setup(uint8_t root_idx, uint8_t device_address, uint8_t c
 bool pio_usb_host_endpoint_transfer(uint8_t root_idx, uint8_t device_address, uint8_t ep_address, uint8_t* buffer, uint16_t buflen);
 
 //--------------------------------------------------------------------
-// Device functions
+// Device Controller functions
 //--------------------------------------------------------------------
 
 // Device IRQ Handler

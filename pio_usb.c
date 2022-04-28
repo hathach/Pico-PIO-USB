@@ -25,11 +25,9 @@
 #include "usb_tx.pio.h"
 #include "usb_rx.pio.h"
 
-#include "tusb.h" // for logging
-
 #define UNUSED_PARAMETER(x) (void)x
 
-/*static*/ usb_device_t pio_usb_device[PIO_USB_DEVICE_CNT];
+usb_device_t pio_usb_device[PIO_USB_DEVICE_CNT];
 pio_port_t pio_port[1];
 root_port_t pio_usb_root_port[PIO_USB_ROOT_PORT_CNT];
 endpoint_t pio_usb_ep_pool[PIO_USB_EP_POOL_CNT];
@@ -38,7 +36,7 @@ endpoint_t pio_usb_ep_pool[PIO_USB_EP_POOL_CNT];
 // Bus functions
 //--------------------------------------------------------------------+
 
-/*static*/ void __no_inline_not_in_flash_func(send_pre)(const pio_port_t *pp) {
+static void __no_inline_not_in_flash_func(send_pre)(const pio_port_t *pp) {
   uint8_t data[] = {USB_SYNC, USB_PID_PRE};
 
   // send PRE token in full-speed
@@ -76,7 +74,7 @@ endpoint_t pio_usb_ep_pool[PIO_USB_EP_POOL_CNT];
   pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_eop, true);
 }
 
-/*static*/ void __not_in_flash_func(pio_usb_bus_usb_transfer)(const pio_port_t *pp,
+void __not_in_flash_func(pio_usb_bus_usb_transfer)(const pio_port_t *pp,
                                               uint8_t *data, uint16_t len) {
   if (pp->need_pre) {
     send_pre(pp);
@@ -282,7 +280,7 @@ void pio_usb_bus_init(pio_port_t *pp, const pio_usb_configuration_t *c, root_por
 }
 
 //--------------------------------------------------------------------+
-//
+// Application API
 //--------------------------------------------------------------------+
 
 endpoint_t *pio_usb_get_endpoint(usb_device_t *device, uint8_t idx) {
@@ -308,9 +306,7 @@ int __no_inline_not_in_flash_func(pio_usb_get_in_data)(endpoint_t *ep,
 
     ep->new_data_flag = false;
 
-    pio_usb_ll_transfer_start(ep, ep->buffer, ep->size);
-
-    return len;
+    return pio_usb_ll_transfer_start(ep, ep->buffer, ep->size) ? len : -1;
   }
 
   return -1;
@@ -323,16 +319,16 @@ int __no_inline_not_in_flash_func(pio_usb_set_out_data)(endpoint_t *ep,
     return -1;
   }
 
-  pio_usb_ll_transfer_start(ep, (uint8_t*) buffer, len);
-
-  return 0;
+  return pio_usb_ll_transfer_start(ep, (uint8_t*) buffer, len) ? 0 : -1;
 }
 
+//--------------------------------------------------------------------+
+// Low Level Function
+//--------------------------------------------------------------------+
 
 void __no_inline_not_in_flash_func(pio_usb_ll_configure_endpoint)(endpoint_t * ep, uint8_t const* desc_endpoint)
 {
   const endpoint_descriptor_t *d = (const endpoint_descriptor_t *) desc_endpoint;
-
   ep->size             = d->max_size[0] | (d->max_size[1] << 8);
   ep->ep_num           = d->epaddr;
   ep->attr             = d->attr;
@@ -340,7 +336,7 @@ void __no_inline_not_in_flash_func(pio_usb_ll_configure_endpoint)(endpoint_t * e
   ep->data_id          = 0;
 }
 
-static inline __force_inline uint16_t prepare_tx_data(endpoint_t * ep) {
+static inline __force_inline void prepare_tx_data(endpoint_t * ep) {
   uint16_t const xact_len = pio_usb_ll_get_transaction_len(ep);
   ep->buffer[0] = USB_SYNC;
   ep->buffer[1] = (ep->data_id == 1) ? USB_PID_DATA1 : USB_PID_DATA0; // USB_PID_SETUP also DATA0
@@ -353,6 +349,10 @@ static inline __force_inline uint16_t prepare_tx_data(endpoint_t * ep) {
 
 bool __no_inline_not_in_flash_func(pio_usb_ll_transfer_start)(endpoint_t * ep, uint8_t* buffer, uint16_t buflen)
 {
+  if (ep->has_transfer) {
+    return false;
+  }
+
   ep->app_buf = buffer;
   ep->total_len = buflen;
   ep->actual_len = 0;
