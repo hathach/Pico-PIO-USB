@@ -142,9 +142,6 @@ int main() {
       mouse_report.x = 1;
       endpoint_t *ep = pio_usb_get_endpoint(usb_device, 2);
       pio_usb_set_out_data(ep, (uint8_t*) &mouse_report, sizeof(mouse_report));
-
-      // API transfer with endpoint address can also be used
-      // pio_usb_device_transfer(EPNUM_MOUSE, (uint8_t *)&mouse_report, sizeof(mouse_report));
     }
     sleep_ms(500);
   }

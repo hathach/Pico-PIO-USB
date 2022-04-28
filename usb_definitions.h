@@ -1,7 +1,7 @@
 
 #pragma once
 
-#include <pico/types.h>
+#include <stdint.h>
 #include "pio_usb_configuration.h"
 
 typedef enum {

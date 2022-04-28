@@ -17,8 +17,6 @@
 #include "usb_tx.pio.h"
 #include "usb_rx.pio.h"
 
-#include "tusb.h"
-
 static alarm_pool_t* _alarm_pool = NULL;
 static repeating_timer_t sof_rt;
 static bool timer_active;

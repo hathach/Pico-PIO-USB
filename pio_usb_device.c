@@ -20,8 +20,6 @@
 #include "hardware/irq.h"
 #include "hardware/dma.h"
 
-#include "tusb.h"
-
 static uint8_t new_devaddr = 0;
 static uint8_t ep0_crc5_lut[16];
 static __unused usb_descriptor_buffers_t descriptor_buffers;
@@ -357,7 +355,7 @@ void pio_usb_device_task(void) {
 static void __no_inline_not_in_flash_func(configure_all_endpoints)(uint8_t const *desc) {
   uint8_t const * desc_end = desc + (descriptor_buffers.config[2] | (descriptor_buffers.config[3] << 8));
   while(desc < desc_end) {
-    if (desc[1] == TUSB_DESC_ENDPOINT) {
+    if (desc[1] == DESC_TYPE_ENDPOINT) {
       pio_usb_device_endpoint_open(desc);
     }
     desc += desc[0];
