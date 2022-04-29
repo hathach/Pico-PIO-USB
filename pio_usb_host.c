@@ -548,6 +548,7 @@ static int __no_inline_not_in_flash_func(usb_setup_transaction)(
 //--------------------------------------------------------------------+
 // USB Host Stack
 //--------------------------------------------------------------------+
+#ifndef PIO_USB_USE_TINYUSB
 
 static void on_device_connect(pio_port_t *pp, root_port_t *root,
                               int device_idx) {
@@ -1264,8 +1265,7 @@ static void __no_inline_not_in_flash_func(handle_endpoint_irq)(
 }
 
 // IRQ Handler
-void __attribute__((weak))
-__no_inline_not_in_flash_func(pio_usb_host_irq_handler)(uint8_t root_id) {
+void __no_inline_not_in_flash_func(pio_usb_host_irq_handler)(uint8_t root_id) {
   root_port_t *root = PIO_USB_ROOT_PORT(root_id);
   uint32_t const ints = root->ints;
 
@@ -1295,5 +1295,7 @@ __no_inline_not_in_flash_func(pio_usb_host_irq_handler)(uint8_t root_id) {
   // clear all
   root->ints &= ~ints;
 }
+
+#endif // PIO_USB_USE_TINYUSB
 
 #pragma GCC pop_options
