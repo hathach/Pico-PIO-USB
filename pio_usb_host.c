@@ -11,6 +11,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "hardware/sync.h"
+
 #include "pio_usb.h"
 #include "pio_usb_ll.h"
 #include "usb_crc.h"
@@ -26,10 +28,6 @@ static volatile bool start_timer_flag;
 static uint32_t int_stat;
 
 static bool sof_timer(repeating_timer_t *_rt);
-
-static int usb_setup_transaction( pio_port_t *pp,  endpoint_t *ep);
-static int usb_in_transaction(pio_port_t* pp, endpoint_t * ep);
-static int usb_out_transaction(pio_port_t* pp, endpoint_t * ep);
 
 //--------------------------------------------------------------------+
 // Application API
@@ -210,6 +208,9 @@ static bool __no_inline_not_in_flash_func(connection_check)(root_port_t *port) {
 //--------------------------------------------------------------------+
 // SOF
 //--------------------------------------------------------------------+
+static int usb_setup_transaction( pio_port_t *pp,  endpoint_t *ep);
+static int usb_in_transaction(pio_port_t* pp, endpoint_t * ep);
+static int usb_out_transaction(pio_port_t* pp, endpoint_t * ep);
 
 static bool __no_inline_not_in_flash_func(sof_timer)(repeating_timer_t *_rt) {
   static uint8_t sof_packet[4] = {USB_SYNC, USB_PID_SOF, 0x00, 0x10};
@@ -240,26 +241,37 @@ static bool __no_inline_not_in_flash_func(sof_timer)(repeating_timer_t *_rt) {
 
     for (int ep_pool_idx = 0; ep_pool_idx < PIO_USB_EP_POOL_CNT; ep_pool_idx++) {
       endpoint_t *ep = PIO_USB_ENDPOINT(ep_pool_idx);
+      if ((ep->root_idx == root_idx) && ep->size) {
+        bool const is_periodic = ((ep->attr & 0x03) == EP_ATTR_INTERRUPT);
 
-      if (ep->root_idx == root_idx && ep->size && ep->has_transfer) {
-
-        if (ep->need_pre) {
-          pp->need_pre = true;
+        if ( is_periodic && (ep->interval_counter > 0)) {
+          ep->interval_counter--;
+          continue;
         }
 
-        if (ep->ep_num == 0 && ep->data_id == USB_PID_SETUP) {
-          usb_setup_transaction(pp, ep);
-        }else {
-          if ( ep->ep_num & 0x80 ) {
-            usb_in_transaction(pp, ep);
-          }else{
-            usb_out_transaction(pp, ep);
+        if (ep->has_transfer) {
+          if (ep->need_pre) {
+            pp->need_pre = true;
           }
-        }
 
-        if (ep->need_pre) {
-          pp->need_pre = false;
-          restore_fs_bus(pp);
+          if (ep->ep_num == 0 && ep->data_id == USB_PID_SETUP) {
+            usb_setup_transaction(pp, ep);
+          }else {
+            if ( ep->ep_num & 0x80 ) {
+              usb_in_transaction(pp, ep);
+            }else{
+              usb_out_transaction(pp, ep);
+            }
+
+            if (is_periodic) {
+              ep->interval_counter = ep->interval - 1;
+            }
+          }
+
+          if (ep->need_pre) {
+            pp->need_pre = false;
+            restore_fs_bus(pp);
+          }
         }
       }
     }
@@ -900,11 +912,7 @@ static int enumerate_device(usb_device_t *device, uint8_t address) {
           }
 
           if (ep != NULL) {
-            for (int bit_idx = 0; bit_idx < 6; bit_idx++) {
-              if ((1 << bit_idx) <= d->interval) {
-                ep->interval = (1 << bit_idx);
-              }
-            }
+            ep->interval = d->interval;
             ep->interval_counter = 0;
             ep->size = d->max_size[0] | (d->max_size[1] << 8);
             ep->attr = d->attr | EP_ATTR_ENUMERATING;

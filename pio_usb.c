@@ -329,11 +329,12 @@ int __no_inline_not_in_flash_func(pio_usb_set_out_data)(endpoint_t *ep,
 void __no_inline_not_in_flash_func(pio_usb_ll_configure_endpoint)(endpoint_t * ep, uint8_t const* desc_endpoint)
 {
   const endpoint_descriptor_t *d = (const endpoint_descriptor_t *) desc_endpoint;
-  ep->size             = d->max_size[0] | (d->max_size[1] << 8);
-  ep->ep_num           = d->epaddr;
-  ep->attr             = d->attr;
+  ep->size = d->max_size[0] | (d->max_size[1] << 8);
+  ep->ep_num = d->epaddr;
+  ep->attr = d->attr;
+  ep->interval = d->interval;
   ep->interval_counter = 0;
-  ep->data_id          = 0;
+  ep->data_id = 0;
 }
 
 static inline __force_inline void prepare_tx_data(endpoint_t * ep) {
