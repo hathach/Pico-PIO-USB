@@ -141,7 +141,7 @@ int main() {
       hid_mouse_report_t mouse_report = {0};
       mouse_report.x = 1;
       endpoint_t *ep = pio_usb_get_endpoint(usb_device, 2);
-      pio_usb_set_out_data(ep, (uint8_t*) &mouse_report, sizeof(mouse_report));
+      pio_usb_set_out_data(ep, (uint8_t *)&mouse_report, sizeof(mouse_report));
     }
     sleep_ms(500);
   }
