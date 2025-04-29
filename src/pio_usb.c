@@ -242,7 +242,23 @@ int __no_inline_not_in_flash_func(pio_usb_bus_receive_packet_and_handshake)(
     } else if ((pp->pio_usb_rx->irq & IRQ_RX_COMP_MASK) != 0) {
       // Exit since we've gotten an EOP.
       // Timing critical: per USB specs, handshake must be sent within 2-7 bit-time strictly
-      busy_wait_at_least_cycles(turnaround_in_cycle); // wait for turnaround
+      //busy_wait_at_least_cycles(turnaround_in_cycle); // wait for turnaround
+      pico_default_asm_volatile (
+      #ifdef __riscv
+              // Note the range is halved on RISC-V due to signed comparison (no carry flag)
+              ".option push\n"
+              ".option norvc\n" // force 32 bit addi, so branch prediction guaranteed
+              ".p2align 2\n"
+              "1: \n"
+              "addi %0, %0, -2 \n"
+              "bgez %0, 1b\n"
+              ".option pop"
+      #else
+      "1: subs %0, #3\n"
+      "bcs 1b\n"
+      #endif
+      : "+r" (turnaround_in_cycle) : : "cc", "memory"
+      );
 
       if (handshake == USB_PID_ACK) {
         // Only ACK if crc matches
