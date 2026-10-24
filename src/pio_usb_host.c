@@ -693,7 +693,7 @@ bool pio_usb_host_endpoint_abort_transfer(uint8_t root_idx, uint8_t device_addre
   // Race potential: SOF timer can be called before transfer_aborted is actually set
   // and started the transfer. Wait 1 usb frame for transaction to complete.
   // On the next SOF timer, transfer_aborted will be checked and skipped
-  for (int wait_ms = 0; wait_ms < 8 && ep->has_transfer && ep->transfer_started; wait_ms++) {
+  while (ep->has_transfer && ep->transfer_started) {
     busy_wait_ms(1);
   }
 
