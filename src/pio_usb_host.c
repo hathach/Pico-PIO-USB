@@ -633,7 +633,7 @@ bool pio_usb_host_send_setup(uint8_t root_idx, uint8_t device_address,
   ep->is_tx = true;
 
 #if PIO_USB_ISO_RING_SIZE
-  if (iso_ring_ep && iso_ring_ep->dev_addr == device_address &&
+  if (iso_ring_ep && iso_ring_ep->root_idx == root_idx && iso_ring_ep->dev_addr == device_address &&
       (setup_packet[0] & 0x60) == 0 && (setup_packet[1] == 9 || setup_packet[1] == 11)) {
     iso_ring_ep = NULL;
   }
