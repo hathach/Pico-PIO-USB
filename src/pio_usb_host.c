@@ -36,6 +36,10 @@ static uint8_t sof_packet[4] = {USB_SYNC, USB_PID_SOF, 0x00, 0x10};
 static uint8_t sof_packet_encoded[4 * 2 * 7 / 6 + 2];
 static uint8_t sof_packet_encoded_len;
 static uint8_t keepalive_encoded[1];
+#if PIO_USB_ISO_RING_SIZE
+// Serializes ring ownership and reset (thread) against its use in the frame ISR
+static spin_lock_t *iso_ring_lock;
+#endif
 
 static bool sof_timer(repeating_timer_t *_rt);
 
@@ -86,6 +90,12 @@ usb_device_t *pio_usb_host_init(const pio_usb_configuration_t *c) {
   sof_packet_encoded_len =
       pio_usb_ll_encode_tx_data(sof_packet, sizeof(sof_packet), sof_packet_encoded);
   pio_usb_ll_encode_tx_data(NULL, 0, keepalive_encoded);
+
+#if PIO_USB_ISO_RING_SIZE
+  if (!iso_ring_lock) {
+    iso_ring_lock = spin_lock_init(spin_lock_claim_unused(true));
+  }
+#endif
 
   if (!c->skip_alarm_pool) {
     _alarm_pool = c->alarm_pool;
@@ -431,15 +441,20 @@ void __not_in_flash_func(pio_usb_host_frame)(void) {
         }
 
 #if PIO_USB_ISO_RING_SIZE
-        if ((ep->attr & 0x03) == EP_ATTR_ISOCHRONOUS && (ep->ep_num & EP_IN) &&
-            ep != iso_ring_ep) {
-          if (ep->has_transfer && !ep->transfer_aborted) {
+        bool is_ring_ep = false;
+        if ((ep->attr & 0x03) == EP_ATTR_ISOCHRONOUS && (ep->ep_num & EP_IN)) {
+          uint32_t const save = spin_lock_blocking(iso_ring_lock);
+          is_ring_ep = ep == iso_ring_ep;
+          if (!is_ring_ep && ep->has_transfer && !ep->transfer_aborted) {
             pio_usb_ll_transfer_complete(ep, PIO_USB_INTS_ENDPOINT_ERROR_BITS);
           }
-          continue;
+          spin_unlock(iso_ring_lock, save);
+          if (!is_ring_ep) {
+            continue;
+          }
         }
         bool const live = ep->has_transfer && !ep->transfer_aborted;
-        bool const active = live || ep == iso_ring_ep;
+        bool const active = live || is_ring_ep;
 #else
         bool const live = ep->has_transfer && !ep->transfer_aborted;
         bool const active = live;
@@ -550,6 +565,16 @@ void pio_usb_host_port_reset_end(uint8_t root_idx) {
   root->suspended = false;
 }
 
+#if PIO_USB_ISO_RING_SIZE
+static void iso_ring_stop_device(uint8_t root_idx, uint8_t device_address) {
+  uint32_t const save = spin_lock_blocking(iso_ring_lock);
+  if (iso_ring_ep && iso_ring_ep->root_idx == root_idx && iso_ring_ep->dev_addr == device_address) {
+    iso_ring_ep = NULL;
+  }
+  spin_unlock(iso_ring_lock, save);
+}
+#endif
+
 void pio_usb_host_close_device(uint8_t root_idx, uint8_t device_address) {
   for (int ep_pool_idx = 0; ep_pool_idx < PIO_USB_EP_POOL_CNT; ep_pool_idx++) {
     endpoint_t *ep = PIO_USB_ENDPOINT(ep_pool_idx);
@@ -557,13 +582,11 @@ void pio_usb_host_close_device(uint8_t root_idx, uint8_t device_address) {
         ep->size) {
       ep->size = 0;
       ep->has_transfer = false;
-#if PIO_USB_ISO_RING_SIZE
-      if (ep == iso_ring_ep) {
-        iso_ring_ep = NULL;
-      }
-#endif
     }
   }
+#if PIO_USB_ISO_RING_SIZE
+  iso_ring_stop_device(root_idx, device_address);
+#endif
 }
 
 static inline __force_inline endpoint_t * _find_ep(uint8_t root_idx, 
@@ -613,9 +636,11 @@ bool pio_usb_host_endpoint_close(uint8_t root_idx, uint8_t device_address,
 
   ep->size = 0; // mark as closed
 #if PIO_USB_ISO_RING_SIZE
+  uint32_t const save = spin_lock_blocking(iso_ring_lock);
   if (ep == iso_ring_ep) {
     iso_ring_ep = NULL;
   }
+  spin_unlock(iso_ring_lock, save);
 #endif
   return true;
 }
@@ -633,9 +658,8 @@ bool pio_usb_host_send_setup(uint8_t root_idx, uint8_t device_address,
   ep->is_tx = true;
 
 #if PIO_USB_ISO_RING_SIZE
-  if (iso_ring_ep && iso_ring_ep->root_idx == root_idx && iso_ring_ep->dev_addr == device_address &&
-      (setup_packet[0] & 0x60) == 0 && (setup_packet[1] == 9 || setup_packet[1] == 11)) {
-    iso_ring_ep = NULL;
+  if ((setup_packet[0] & 0x60) == 0 && (setup_packet[1] == 9 || setup_packet[1] == 11)) {
+    iso_ring_stop_device(root_idx, device_address);
   }
 #endif
 
@@ -660,15 +684,20 @@ bool pio_usb_host_endpoint_transfer(uint8_t root_idx, uint8_t device_address,
   }
 
 #if PIO_USB_ISO_RING_SIZE
-  if ((ep->attr & 0x03) == EP_ATTR_ISOCHRONOUS && !ep->is_tx && ep != iso_ring_ep) {
-    // Start receiving this endpoint's packets every frame. Only one
-    // isochronous IN endpoint at a time uses the ring.
-    iso_ring_ep = NULL;
-    iso_ring_head = 0;
-    iso_ring_count = 0;
-    iso_ring_lost = false;
-    iso_ring_silent = 0;
-    iso_ring_ep = ep;
+  if ((ep->attr & 0x03) == EP_ATTR_ISOCHRONOUS && !ep->is_tx) {
+    uint32_t const save = spin_lock_blocking(iso_ring_lock);
+    if (ep != iso_ring_ep) {
+      // Start receiving this endpoint's packets every frame. Only one
+      // isochronous IN endpoint at a time uses the ring.
+      iso_ring_head = 0;
+      iso_ring_count = 0;
+      iso_ring_lost = false;
+      iso_ring_silent = 0;
+      iso_ring_ep = ep;
+    }
+    bool const ret = pio_usb_ll_transfer_start(ep, buffer, buflen);
+    spin_unlock(iso_ring_lock, save);
+    return ret;
   }
 #endif
 
@@ -743,9 +772,11 @@ static int __no_inline_not_in_flash_func(usb_in_transaction)(pio_port_t *pp,
 
 #if PIO_USB_ISO_RING_SIZE
   if (is_iso) {
+    uint32_t const save = spin_lock_blocking(iso_ring_lock);
     if (ep == iso_ring_ep) {
       iso_ring_receive(ep, receive_len, receive_pid, &pp->usb_rx_buffer[2]);
     }
+    spin_unlock(iso_ring_lock, save);
   } else
 #endif
   if (is_iso) {
