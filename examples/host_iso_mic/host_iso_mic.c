@@ -37,10 +37,13 @@
 //
 // PIO_USB_ISO_RING_SIZE > 0 (default here): the host polls the endpoint
 // every frame from the moment the first transfer is queued and stores each
-// packet in a ring buffer as a record:
+// non-empty packet in a ring buffer as a record:
 //
 //   2 bytes little-endian length, then the packet data
-//   length 0xFFFF: one or more packets were lost (CRC error or ring full)
+//   length 0xFFFF: one or more packets were lost (no reply, CRC error or
+//   ring full)
+//
+// Zero-length packets add no record.
 //
 // A queued transfer completes as soon as at least one whole record fits in
 // its buffer. The application walks the records in the completion callback
