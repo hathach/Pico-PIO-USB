@@ -388,9 +388,12 @@ static void __no_inline_not_in_flash_func(iso_ring_receive)(endpoint_t *ep, int 
       break;
     }
     if (rec_len > ep->total_len) {
-      iso_ring_copy_out(NULL, rec_len); // can never fit; drop it
-      iso_ring_lost = true;
-      iso_ring_marked = false;
+      iso_ring_drop_oldest(); // can never fit
+      if (ep->total_len < 2) {
+        // Not even the marker fits: keep the gap for a later transfer
+        iso_ring_lost = true;
+        iso_ring_marked = false;
+      }
       continue;
     }
     if (ep->actual_len + rec_len > ep->total_len) {
